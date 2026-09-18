@@ -1,0 +1,83 @@
+# ═══════════════════════════════════════════
+#  《牵丝》 .gitignore
+#  目标：把仓库体积压在 Gitee 社区版 500MB 上限之内
+# ═══════════════════════════════════════════
+
+# ── Cocos Creator 3.x ──────────────────────
+# library/ 是导入缓存，动辄数百 MB，绝对不能提交
+/library/
+/temp/
+/local/
+/build/
+/profiles/
+/native/
+/extensions/**/node_modules/
+
+# Cocos 生成的元数据（保留 assets 下的 .meta，排除根目录产物）
+/*.meta
+
+# ── 依赖 ───────────────────────────────────
+node_modules/
+package-lock.json.bak
+yarn-error.log
+
+# ── 编辑器 / IDE ───────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── 操作系统 ───────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── 构建与产物 ─────────────────────────────
+dist/
+out/
+*.apk
+*.aab
+*.ipa
+*.exe
+*.zip
+*.rar
+
+# ── 日志与临时文件 ─────────────────────────
+*.log
+logs/
+*.tmp
+*.bak
+*.orig
+
+# ── 本地配置（含密钥，绝不提交）────────────
+.env
+.env.*
+*.local
+local.config.json
+secrets/
+*.pem
+*.p12
+*.keystore
+*.jks
+
+# ── 美术源文件（体积大，走对象存储或 LFS）──
+# 取消注释即可启用排除
+# *.psd
+# *.ai
+# *.aseprite
+# *.blend
+# assets/**/raw/
+
+# ── 音频源文件 ─────────────────────────────
+# *.wav
+# *.aiff
+# *.flac
+
+# ── 测试与覆盖率 ───────────────────────────
+coverage/
+.nyc_output/
+test-results/
+
+# ── 临时原型产物（可重新生成）──────────────
+prototype/**/*.tmp.png

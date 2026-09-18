@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>牵丝 · 断桥</title>
+<style>
+  html,body{margin:0;padding:0;background:#000;overflow:hidden;}
+  .stage{position:relative;width:1920px;height:1080px;overflow:hidden;
+    background:radial-gradient(125% 105% at 40% 28%, #FFFDF8 0%, #FCF8EE 40%, #F7F1E2 70%, #F0E7D3 100%);}
+  svg{position:absolute;inset:0;width:1920px;height:1080px;}
+  .grain{position:absolute;inset:0;opacity:.04;mix-blend-mode:multiply;}
+</style>
+</head>
+<body>
+<div class="stage">
+  <svg class="grain" viewBox="0 0 1920 1080"><rect width="1920" height="1080" filter="url(#grain)"/></svg>
+  <svg id="S" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="grain" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" seed="9" result="n"/>
+        <feColorMatrix in="n" type="saturate" values="0"/>
+      </filter>
+
+      <!-- 墨体主形：低频位移，保持块状 -->
+      <filter id="goo" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="b"/>
+        <feColorMatrix in="b" type="matrix"
+          values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 30 -15" result="g"/>
+        <feTurbulence type="fractalNoise" baseFrequency="0.005 0.008" numOctaves="3" seed="4" result="nz"/>
+        <feDisplacementMap in="g" in2="nz" scale="7" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <!-- 溅墨：小圆专用，柔和 -->
+      <filter id="goo2" x="-80%" y="-80%" width="260%" height="260%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="4.5" result="b"/>
+        <feColorMatrix in="b" type="matrix"
+          values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9" result="g"/>
+        <feTurbulence type="fractalNoise" baseFrequency="0.02 0.03" numOctaves="3" seed="8" result="nz"/>
+        <feDisplacementMap in="g" in2="nz" scale="6" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+
+      <filter id="wet" x="-25%" y="-25%" width="150%" height="150%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.008 0.021" numOctaves="5" seed="17" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="11" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <filter id="dry" x="-25%" y="-25%" width="150%" height="150%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.05 0.11" numOctaves="4" seed="23" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+
+      <filter id="w1" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4"/></filter>
+      <filter id="w2" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="11"/></filter>
+      <filter id="w3" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="22"/></filter>
+
+      <filter id="glow" x="-140%" y="-140%" width="380%" height="380%">
+        <feGaussianBlur stdDeviation="7" result="b1"/>
+        <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="b2"/>
+        <feMerge><feMergeNode in="b1"/><feMergeNode in="b1"/>
+                 <feMergeNode in="b2"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="glowsoft" x="-140%" y="-140%" width="380%" height="380%">
+        <feGaussianBlur stdDeviation="3.4" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+
+      <linearGradient id="gGold" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#BE8922"/><stop offset="0.42" stop-color="#EDC155"/>
+        <stop offset="1" stop-color="#FFE9A6"/>
+      </linearGradient>
+      <radialGradient id="gMoon" cx="50%" cy="50%" r="50%">
+        <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.95"/>
+        <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="vign" cx="40%" cy="32%" r="82%">
+        <stop offset="0.66" stop-color="#2A2416" stop-opacity="0"/>
+        <stop offset="1" stop-color="#2A2416" stop-opacity="0.11"/>
+      </radialGradient>
+    </defs>
+    <g id="art"></g>
+    <g id="ui"></g>
+  </svg>
+</div>
+
+<script>
+(function(){
+const ART=document.getElementById('art'), UI=document.getElementById('ui');
+const NS='http://www.w3.org/2000/svg';
+const R=(function(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}})(20260918);
+function el(tag,at,parent){const e=document.createElementNS(NS,tag);
+  for(const k in at) if(at[k]!==''&&at[k]!=null) e.setAttribute(k,at[k]);
+  (parent||ART).appendChild(e); return e;}
+const PAPER='#F7F1E2';
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+
+/* ═════ 远山 ═════ */
+function hProfile(x,ph){
+  const a=Math.pow(Math.max(0,Math.sin(x*0.00118+ph)),1.7);
+  const b=Math.pow(Math.max(0,Math.sin(x*0.00267+ph*2.1)),2.4);
+  const c=Math.pow(Math.max(0,Math.sin(x*0.00553+ph*3.3)),3.0);
+  const d=Math.pow(Math.max(0,Math.sin(x*0.01110+ph*4.7)),3.4);
+  return Math.min(1,a*0.62+b*0.42+c*0.26+d*0.14);
+}
+function ridge(topY,baseY,ph,step){
+  let d='M -120,'+baseY;
+  for(let x=-120;x<=2040;x+=step) d+=' L '+x+','+(baseY-hProfile(x,ph)*(baseY-topY)).toFixed(1);
+  return d+' L 2040,'+baseY+' Z';
+}
+el('circle',{cx:256,cy:168,r:92,fill:'url(#gMoon)',opacity:0.60});
+el('path',{d:ridge(300,592,0.0,16),fill:'#6A6759',opacity:0.19,filter:'url(#w3)'});
+el('path',{d:ridge(354,600,1.7,13),fill:'#545144',opacity:0.22,filter:'url(#w3)'});
+el('path',{d:ridge(404,608,3.4,10),fill:'#433F36',opacity:0.21,filter:'url(#w2)'});
+el('path',{d:ridge(458,616,5.1,8), fill:'#3A362E',opacity:0.17,filter:'url(#w1)'});
+
+/* ═════ 雾气（纸色，克制） ═════ */
+[[980,624,1180,34,.9],[420,668,540,22,.5],[1560,690,600,26,.45],[900,880,940,40,.30]]
+ .forEach(function(m){el('ellipse',{cx:m[0],cy:m[1],rx:m[2],ry:m[3],fill:PAPER,opacity:m[4],filter:'url(#w2)'});});
+
+/* ═════ 断桥 ═════ */
+/* 近侧：实心墨块打底 + 笔触质感 */
+el('path',{d:'M -200,580 C 40,572 250,582 450,574 C 650,566 850,578 1010,572 '+
+  'C 1075,569 1110,564 1136,560 L 1160,578 L 1142,596 L 1164,610 L 1144,628 '+
+  'L 1156,640 L 1122,644 C 990,640 850,646 690,640 C 510,634 330,642 150,636 '+
+  'C 30,632 -80,638 -200,634 Z',fill:'#26241D',filter:'url(#wet)'});
+/* 上沿浓、下沿淡 */
+el('path',{d:'M -200,580 C 40,572 250,582 450,574 C 650,566 850,578 1010,572 '+
+  'C 1075,569 1110,564 1136,560 L 1146,572 C 1080,578 1010,582 900,584 '+
+  'C 700,590 480,586 240,592 C 100,596 -60,594 -200,592 Z',
+  fill:'#15130F',opacity:0.55,filter:'url(#dry)'});
+/* 笔触质感 */
+for(let i=0;i<16;i++){
+  const y=578+R()*58, th=2+R()*6;
+  const x0=-60+R()*180, x1=980+R()*170;
+  const fade=clamp((x0+60)/420,0.12,1);
+  el('path',{d:'M '+x0.toFixed(0)+','+y.toFixed(0)+' C '+((x0+x1)/2).toFixed(0)+','+(y+(R()-.5)*10).toFixed(0)+
+    ' '+((x0+x1)/2+140).toFixed(0)+','+(y+(R()-.5)*10).toFixed(0)+' '+x1.toFixed(0)+','+(y+(R()-.5)*8).toFixed(0),
+    fill:'none',stroke:(R()>0.5?'#4A463C':'#100E0B'),'stroke-width':th.toFixed(1),
+    'stroke-linecap':'round',opacity:((0.10+R()*0.22)*fade).toFixed(3),filter:'url(#dry)'});
+}
+/* 崩口：贴住断面的犬牙 */
+/* 崩口：只留两道飞白，其余交给笔锋自己 */
+el('path',{d:'M 1120,566 C 1148,580 1158,600 1146,626',fill:'none',stroke:'#100E0B',
+  'stroke-width':8,opacity:0.34,'stroke-linecap':'round',filter:'url(#dry)'});
+el('path',{d:'M 1128,590 L 1160,584',fill:'none',stroke:'#100E0B','stroke-width':3.4,
+  opacity:0.24,'stroke-linecap':'round',filter:'url(#dry)'});
+/* 对岸 */
+el('path',{d:'M 1512,586 C 1620,580 1730,590 1840,584 C 1890,581 1930,584 1970,580 '+
+  'L 1970,652 C 1900,656 1800,650 1700,654 C 1620,657 1560,652 1512,654 Z',
+  fill:'#2A281F',filter:'url(#wet)'});
+el('path',{d:'M 1512,654 C 1620,658 1740,652 1850,656 C 1900,658 1940,654 1970,656 '+
+  'L 1970,674 C 1900,672 1790,676 1690,672 C 1610,669 1556,673 1512,670 Z',
+  fill:'#15130F',opacity:0.5,filter:'url(#dry)'});
+
+/* ═════ 断裂梁柱：实心 + 质感 ═════ */
+function pillar(d,textureN,cx,w,y0,y1){
+  el('path',{d:d,fill:'#26241D',filter:'url(#wet)'});
+  for(let i=0;i<textureN;i++){
+    const x=cx+(R()-.5)*w, a=y0+R()*50, b=y1-R()*50;
+    el('path',{d:'M '+x.toFixed(1)+','+a.toFixed(1)+' C '+(x+(R()-.5)*14).toFixed(1)+','+((a+b)/2).toFixed(1)+
+      ' '+(x+(R()-.5)*14).toFixed(1)+','+((a+b)/2).toFixed(1)+' '+(x+(R()-.5)*10).toFixed(1)+','+b.toFixed(1),
+      fill:'none',stroke:(R()>0.45?'#5A564A':'#0F0D0A'),'stroke-width':(1.6+R()*6).toFixed(1),
+      'stroke-linecap':'round',opacity:(0.10+R()*0.24).toFixed(3),filter:'url(#dry)'});
+  }
+}
+pillar('M 648,58 C 690,44 726,40 764,34 L 760,590 L 654,584 Z',18,704,110,58,590);
+pillar('M 846,130 C 880,120 912,116 946,110 L 938,428 L 852,420 Z',14,894,98,130,428);
+pillar('M 858,506 C 886,498 918,494 946,490 L 944,594 L 854,590 Z',7,900,92,506,594);
+/* 柱顶 / 断口的重墨 */
+[['M 648,58 C 690,44 726,40 764,34',11,0.42],['M 846,130 C 880,120 912,116 946,110',10,0.40],
+ ['M 852,420 C 882,438 912,408 940,430',12,0.55],
+ ['M 858,506 C 888,494 918,490 946,490',10,0.50]].forEach(function(s){
+  el('path',{d:s[0],fill:'none',stroke:'#100E0B','stroke-width':s[1],'stroke-linecap':'round',
+    opacity:s[2],filter:'url(#wet)'});});
+[['M 892,424 L 890,468',3,0.28],['M 914,430 L 920,462',2.2,0.22],['M 870,422 L 862,452',1.8,0.18],
+ ['M 896,502 L 894,472',2.6,0.24],['M 918,498 L 922,470',2,0.18]]
+ .forEach(function(s){el('path',{d:s[0],fill:'none',stroke:'#100E0B','stroke-width':s[1],
+   'stroke-linecap':'round',opacity:s[2],filter:'url(#dry)'});});
+
+/* ═════ 悬吊铁链 ═════ */
+(function(){
+  const g=el('g',{filter:'url(#wet)',opacity:0.56});
+  el('path',{d:'M 452,-30 C 472,124 456,256 474,404',fill:'none',stroke:'#232019',
+    'stroke-width':'6.2','stroke-linecap':'round'},g);
+  for(let i=0;i<10;i++)
+    el('ellipse',{cx:458+Math.sin(i*0.9)*8,cy:26+i*42,rx:8.4,ry:14,fill:'none',
+      stroke:'#232019','stroke-width':'4.1',opacity:0.9},g);
+})();
+
+/* ═════ 无相 · 墨甲 ═════ */
+(function(){
+  const g=el('g');
+  el('ellipse',{cx:1652,cy:534,rx:178,ry:108,fill:'#0B0B08',opacity:0.09,filter:'url(#w2)'},g);
+  const body=el('g',{filter:'url(#goo)'},g);
+  /* 蹲踞重甲：宽底、双肩隆、低首 */
+  [[1652,498,94],[1580,548,60],[1724,546,58],[1610,442,54],[1706,444,52],[1652,392,44],
+   [1530,538,28],[1780,534,26],[1652,574,68],[1552,584,54],[1756,582,52]]
+   .forEach(function(c){el('circle',{cx:c[0],cy:c[1],r:c[2],fill:'#0B0B08'},body);});
+  /* 甲壳：只留几道壳板接缝，避免读成机械齿轮 */
+  const f=el('g',{fill:'none',stroke:'#9E9B92','stroke-linecap':'round',opacity:0.20},g);
+  el('path',{d:'M1650,366 C1690,382 1716,410 1722,446','stroke-width':'3.4'},f);
+  el('path',{d:'M1580,410 C1588,440 1598,470 1612,498','stroke-width':'2.6'},f);
+  el('path',{d:'M1594,524 C1630,542 1670,542 1702,524','stroke-width':'2.2'},f);
+  el('path',{d:'M1652,366 L1652,412 M1648,454 L1642,504','stroke-width':'1.6',opacity:0.7},f);
+  /* 核：唯一暖点 */
+  el('circle',{cx:1670,cy:514,r:12,fill:'#8A7748',opacity:0.20,filter:'url(#w1)'},g);
+  /* 溅墨：明显脱离本体，向左飞散 */
+  const sp=el('g',{filter:'url(#goo2)'},g);
+  [[1462,404,15],[1420,364,11],[1388,434,9],[1448,472,7],[1352,392,6],[1372,330,5]]
+   .forEach(function(c,i){el('circle',{cx:c[0],cy:c[1],r:c[2],fill:'#0B0B08',
+     opacity:(0.88-i*0.10).toFixed(2)},sp);});
+  const st=el('g',{stroke:'#0B0B08','stroke-linecap':'round',opacity:0.26},g);
+  el('path',{d:'M1552,452 L1470,400',fill:'none','stroke-width':'3'},st);
+  el('path',{d:'M1540,506 L1452,478',fill:'none','stroke-width':'2'},st);
+  el('path',{d:'M1576,418 L1502,354',fill:'none','stroke-width':'1.5'},st);
+  el('ellipse',{cx:1652,cy:618,rx:164,ry:12,fill:'#0B0B08',opacity:0.15,filter:'url(#w1)'},g);
+  /* 小墨卒：只落在此岸桥面上 */
+  const m=el('g',{filter:'url(#goo2)'},g);
+  [[1852,584,18],[1894,592,12],[1818,594,11],[1916,586,8]]
+   .forEach(function(c){el('circle',{cx:c[0],cy:c[1],r:c[2],fill:'#0B0B08'},m);});
+})();
+
+/* ═════ 弹道 ═════ */
+el('path',{d:'M364,446 Q693.4,254.6 1090.5,312.3',fill:'none',stroke:'#2A2822',
+  'stroke-width':11,opacity:0.05,filter:'url(#w1)','stroke-linecap':'round'});
+el('path',{d:'M364,446 Q693.4,254.6 1090.5,312.3',fill:'none',stroke:'#2A2822',
+  'stroke-width':2,opacity:0.19,'stroke-dasharray':'1 12','stroke-linecap':'round'});
+el('path',{d:'M1090.5,312.3 Q1355.2,350.8 1650,500',fill:'none',stroke:'#E8B33C',
+  'stroke-width':3.6,opacity:0.26,'stroke-dasharray':'1 20','stroke-linecap':'round',filter:'url(#glowsoft)'});
+el('path',{d:'M1090.5,312.3 Q1355.2,350.8 1650,500',fill:'none',stroke:'#FFEDB8',
+  'stroke-width':2.2,opacity:0.95,'stroke-dasharray':'1 21','stroke-dashoffset':'1','stroke-linecap':'round'});
+el('circle',{cx:1650,cy:500,r:26,fill:'none',stroke:'#E8B33C','stroke-width':1.6,opacity:0.40});
+el('circle',{cx:1650,cy:500,r:42,fill:'none',stroke:'#E8B33C','stroke-width':1,opacity:0.20});
+
+/* ═════ 石块 ═════ */
+[[1040,305,21,.12],[988,298,17,.08],[940,292,13,.05]].forEach(function(c){
+  el('circle',{cx:c[0],cy:c[1],r:c[2],fill:'#3A382F',opacity:c[3]});});
+el('path',{d:'M1090,312 Q1025,301 966,290',fill:'none',stroke:'#EDC155',
+  'stroke-width':1.8,opacity:0.74,filter:'url(#glowsoft)'});
+[[944,280],[948,301],[950,285]].forEach(function(p){
+  el('path',{d:'M966,290 L'+p[0]+','+p[1],fill:'none',stroke:'#EDC155','stroke-width':1.1,
+    opacity:0.56,'stroke-linecap':'round'});});
+el('path',{d:'M1065,289 L1099,283 L1117,297 L1123,319 L1109,341 L1081,347 L1057,335 L1049,313 Z',
+  fill:'#575347',filter:'url(#dry)'});
+el('path',{d:'M1065,289 L1099,283 L1117,297 L1095,301 L1069,309 L1055,319 L1049,313 Z',
+  fill:'#7C7767',opacity:0.54,filter:'url(#dry)'});
+el('path',{d:'M1051,315 L1057,335 L1081,347 L1109,341 L1117,327 L1103,341 L1079,345 L1059,333 Z',
+  fill:'#312F28',opacity:0.64,filter:'url(#dry)'});
+el('path',{d:'M1077,301 L1095,331',fill:'none',stroke:'#33312A','stroke-width':1.3,opacity:0.30});
+
+/* ═════ 主角 ═════ */
+(function(){
+  const g=el('g',{transform:'translate(-36,-69) scale(1.12)'});
+  el('ellipse',{cx:304,cy:580,rx:52,ry:8,fill:'#1A1813',opacity:0.20,filter:'url(#w1)'},g);
+  el('path',{d:'M290,496 C276,504 264,512 252,524',fill:'none',stroke:'#33312A',
+    'stroke-width':11,'stroke-linecap':'round'},g);
+  el('circle',{cx:250,cy:526,r:5.5,fill:'#2B2922'},g);
+  const b=el('g',{filter:'url(#dry)'},g);
+  el('path',{d:'M287,484 C281,508 275,530 269,550 C261,562 254,570 248,578 L360,578 '+
+    'C354,568 347,559 341,549 C334,529 327,506 319,484 Z',fill:'#3A3830'},b);
+  el('path',{d:'M268,506 C290,513 328,513 348,504 L350,518 C330,527 288,527 266,520 Z',
+    fill:'#1C1A15',opacity:0.55},b);
+  el('path',{d:'M272,552 C286,566 300,574 316,576',fill:'none',stroke:'#77725F','stroke-width':1.5,opacity:0.30},b);
+  el('path',{d:'M296,548 C308,564 322,572 336,574',fill:'none',stroke:'#77725F','stroke-width':1.5,opacity:0.22},b);
+  /* 颈：留一点空隙，头才读得出来 */
+  el('path',{d:'M296,478 L312,478 L312,484 L296,484 Z',fill:'#2A2822'},g);
+  el('circle',{cx:304,cy:464,r:15,fill:'#3A3830'},g);
+  el('path',{d:'M288,460 C292,441 318,439 322,458 C324,467 319,473 317,470 '+
+    'C312,457 296,457 292,470 C290,473 287,467 288,460 Z',fill:'#1B1914'},g);
+  el('path',{d:'M289,468 C279,484 275,502 277,520',fill:'none',stroke:'#1B1914',
+    'stroke-width':3,'stroke-linecap':'round',opacity:0.66},g);
+  el('path',{d:'M318,494 C332,484 348,470 360,456',fill:'none',stroke:'#3A3830',
+    'stroke-width':12,'stroke-linecap':'round'},g);
+  el('circle',{cx:364,cy:446,r:5,fill:'#FFEDB8',filter:'url(#glow)'},g);
+})();
+
+/* ═════ 灵丝 · 已断回抽 ═════ */
+(function(){
+  const d='M364,446 C466,392 566,342 672,296 C716,276 750,258 774,241';
+  el('path',{d:d,fill:'none',stroke:'#E8B33C','stroke-width':9,opacity:0.30,
+    'stroke-linecap':'round',filter:'url(#glow)'});
+  el('path',{d:d,fill:'none',stroke:'url(#gGold)','stroke-width':2.8,
+    'stroke-linecap':'round',filter:'url(#glowsoft)'});
+  el('path',{d:d,fill:'none',stroke:'#FFF6D4','stroke-width':0.9,opacity:0.85,transform:'translate(0,1.7)'});
+  [[798,226],[802,244],[792,259],[788,235],[794,252]].forEach(function(p){
+    el('path',{d:'M774,241 L'+p[0]+','+p[1],fill:'none',stroke:'#EDC155','stroke-width':1.3,
+      opacity:0.85,'stroke-linecap':'round'});});
+  el('circle',{cx:774,cy:241,r:7,fill:'#FFEDB8',opacity:0.5,filter:'url(#glow)'});
+})();
+
+/* ═════ 命名 ═════ */
+(function(){
+  const g=el('g',{opacity:0.94},UI);
+  el('text',{x:1478,y:222,'text-anchor':'middle',
+    'font-family':'STXingkai,华文行楷,KaiTi,楷体,STKaiti,serif','font-size':130,fill:'#1A1813'},g)
+    .textContent='一石';
+  el('path',{d:'M1380,252 L1576,252',stroke:'#C08A24','stroke-width':1.8,opacity:0.72},g);
+  el('text',{x:1478,y:288,'text-anchor':'middle','font-family':'Microsoft YaHei,微软雅黑,sans-serif',
+    'font-size':18,fill:'#4A463A','letter-spacing':8},g).textContent='单 次 投 石 击 杀';
+})();
+
+/* ═════ HUD ═════ */
+(function(){
+  const g=el('g',null,UI);
+  el('text',{x:54,y:86,'font-family':'STKaiti,KaiTi,楷体,serif','font-size':25,
+    fill:'#4A463A',opacity:0.72},g).textContent='丝';
+  [[116,1],[164,1],[212,0],[260,0]].forEach(function(d){
+    if(d[1]){el('circle',{cx:d[0],cy:77,r:13,fill:'#E8B33C',filter:'url(#glowsoft)'},g);
+             el('circle',{cx:d[0],cy:77,r:13,fill:'none',stroke:'#8A6D24','stroke-width':1},g);}
+    else el('circle',{cx:d[0],cy:77,r:13,fill:'none',stroke:'#8A6D24','stroke-width':1.6,opacity:0.4},g);
+  });
+})();
+(function(){
+  const g=el('g',{transform:'translate(56,962)'},UI);
+  el('text',{x:0,y:-14,'font-family':'STKaiti,KaiTi,楷体,serif','font-size':21,
+    fill:'#4A463A',opacity:0.7},g).textContent='张力';
+  el('rect',{x:0,y:0,width:230,height:7,rx:3.5,fill:'#3E3A2E',opacity:0.13},g);
+  el('rect',{x:0,y:0,width:179,height:7,rx:3.5,fill:'#E8B33C',filter:'url(#glowsoft)'},g);
+  el('path',{d:'M218,0 L218,7',stroke:'#A03A2A','stroke-width':2.4,opacity:0.55},g);
+  el('text',{x:226,y:9,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':12,
+    fill:'#A03A2A',opacity:0.72},g).textContent='濒断';
+  el('text',{x:0,y:32,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':13,
+    fill:'#6E6858'},g).textContent='78%';
+})();
+(function(){
+  const g=el('g',{transform:'translate(1126,300)'},UI);
+  el('path',{d:'M-14,4 L22,-38',stroke:'#4A463A','stroke-width':1,opacity:0.30},g);
+  el('rect',{x:16,y:-80,width:158,height:48,rx:2,fill:'#FCF9F2',opacity:0.92,
+    stroke:'#8A8272','stroke-width':1},g);
+  el('text',{x:31,y:-56,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':16,
+    fill:'#3E3A2E'},g).textContent='冲击';
+  el('text',{x:80,y:-54,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':24,
+    'font-weight':700,fill:'#1F1D17'},g).textContent='24';
+  el('text',{x:31,y:-42,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':12,
+    fill:'#7A7466'},g).textContent='对墨甲 · 有效';
+})();
+el('text',{x:1866,y:1024,'text-anchor':'end','font-family':'STKaiti,KaiTi,楷体,serif',
+  'font-size':24,fill:'#3E3A2E',opacity:0.5,'letter-spacing':6},UI).textContent='第一章 · 断桥';
+el('rect',{x:0,y:0,width:1920,height:1080,fill:'url(#vign)'},UI);
+})();
+</script>
+</body>
+</html>

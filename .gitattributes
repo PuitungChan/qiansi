@@ -1,0 +1,75 @@
+# ═══════════════════════════════════════════
+#  《牵丝》 .gitattributes
+# ═══════════════════════════════════════════
+
+# 默认：由 git 判断文本/二进制
+* text=auto
+
+# ── 文本文件：统一 LF，避免 Windows/macOS 换行符打架 ──
+*.md      text eol=lf
+*.txt     text eol=lf
+*.csv     text eol=lf
+*.json    text eol=lf
+*.js      text eol=lf
+*.ts      text eol=lf
+*.html    text eol=lf
+*.css     text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.xml     text eol=lf
+*.sh      text eol=lf
+.gitignore       text eol=lf
+.gitattributes   text eol=lf
+
+# ── Windows 专用脚本保留 CRLF ──
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+
+# ── 二进制：禁止任何文本转换 ──
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.webp    binary
+*.ktx     binary
+*.ktx2    binary
+*.astc    binary
+*.pvr     binary
+*.ttf     binary
+*.otf     binary
+*.woff    binary
+*.woff2   binary
+*.mp3     binary
+*.ogg     binary
+*.m4a     binary
+*.wav     binary
+*.mp4     binary
+*.fbx     binary
+*.glb     binary
+*.gltf    binary
+
+# ── CSV 在 diff 中不参与统计（数据表体积大）──
+*.csv     -diff
+
+# ═══════════════════════════════════════════
+#  Git LFS（按需启用）
+#
+#  启用前提：
+#    1. 安装 git-lfs：https://git-lfs.com
+#    2. 执行 git lfs install
+#    3. 确认 Gitee 仓库的 LFS 配额够用
+#    4. 取消下方注释后执行：git lfs track
+#
+#  ⚠️ Gitee 社区版单仓库上限 500MB。
+#     LFS 对象同样占用配额，不要无脑全开。
+#     大体积美术源文件建议放对象存储（OSS/COS），
+#     仓库里只留导出的成品资源。
+# ═══════════════════════════════════════════
+# *.psd   filter=lfs diff=lfs merge=lfs -text
+# *.ai    filter=lfs diff=lfs merge=lfs -text
+# *.aseprite filter=lfs diff=lfs merge=lfs -text
+# *.blend filter=lfs diff=lfs merge=lfs -text
+# *.fbx   filter=lfs diff=lfs merge=lfs -text
+# *.wav   filter=lfs diff=lfs merge=lfs -text
+# *.flac  filter=lfs diff=lfs merge=lfs -text

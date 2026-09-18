@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>牵丝 · 2.5D 分层与相机规范</title>
+<style>
+  html,body{margin:0;padding:0;background:#000;overflow:hidden;}
+  .stage{position:relative;width:2400px;height:1640px;overflow:hidden;
+    background:radial-gradient(120% 100% at 38% 24%, #FFFDF8 0%, #FCF8EF 42%, #F7F1E3 72%, #F1E8D6 100%);}
+  svg{position:absolute;inset:0;width:2400px;height:1640px;}
+  .grain{position:absolute;inset:0;opacity:.035;mix-blend-mode:multiply;}
+</style>
+</head>
+<body>
+<div class="stage">
+  <svg class="grain" viewBox="0 0 2400 1640"><rect width="2400" height="1640" filter="url(#grain)"/></svg>
+  <svg id="S" viewBox="0 0 2400 1640" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="grain" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" seed="9" result="n"/>
+        <feColorMatrix in="n" type="saturate" values="0"/>
+      </filter>
+      <filter id="b1" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="1.6"/></filter>
+      <filter id="b4" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4"/></filter>
+      <filter id="b9" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
+      <filter id="b18" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="18"/></filter>
+      <filter id="ink" x="-25%" y="-25%" width="150%" height="150%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.02 0.06" numOctaves="4" seed="23" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="4" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#FEFCF7"/><stop offset="1" stop-color="#F4EDDD"/>
+      </linearGradient>
+    </defs>
+
+    <g>
+      <text x="70" y="86" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="46"
+            font-weight="700" fill="#1A1813">《牵丝》2.5D 分层与相机规范</text>
+      <text x="72" y="126" font-family="Microsoft YaHei,微软雅黑,sans-serif" font-size="20"
+            fill="#7A7466">玩法严格锁定 XY 物理平面　·　正交相机　·　7 层水墨视差</text>
+      <path d="M70,150 L2330,150" stroke="#3E3A2E" stroke-width="1.4" opacity="0.35"/>
+      <text x="2330" y="126" text-anchor="end" font-family="Microsoft YaHei,微软雅黑,sans-serif"
+            font-size="17" fill="#A39B88">v1.0　·　配套 scene_broken_bridge.png</text>
+    </g>
+    <g id="art"></g>
+    <g id="ui"></g>
+  </svg>
+</div>
+
+<script>
+(function(){
+const ART=document.getElementById('art'), UI=document.getElementById('ui');
+const NS='http://www.w3.org/2000/svg';
+function el(tag,at,p){const e=document.createElementNS(NS,tag);
+  for(const k in at) if(at[k]!==''&&at[k]!=null) e.setAttribute(k,at[k]);
+  (p||ART).appendChild(e); return e;}
+function txt(x,y,s,o,p){const e=el('text',Object.assign({x:x,y:y,
+  'font-family':'Microsoft YaHei,微软雅黑,sans-serif'},o||{}),p);e.textContent=s;return e;}
+function rect(x,y,w,h,o,p){return el('rect',Object.assign({x:x,y:y,width:w,height:h},o||{}),p);}
+function line(x1,y1,x2,y2,o,p){return el('line',Object.assign({x1:x1,y1:y1,x2:x2,y2:y2},o||{}),p);}
+
+const INK='#1A1813', MID='#3E3A2E', SOFT='#7A7466', FAINT='#A39B88', GOLD='#C08A24', GOLDB='#E8B33C';
+
+function panel(x,y,w,h,title,sub){
+  rect(x,y,w,h,{fill:'#FFFFFF',opacity:0.45,rx:3});
+  el('rect',{x:x,y:y,width:w,height:h,fill:'none',stroke:MID,'stroke-width':1,opacity:0.28,rx:3});
+  el('rect',{x:x,y:y,width:5,height:h,fill:GOLD,opacity:0.85});
+  txt(x+22,y+38,title,{'font-size':23,'font-weight':700,fill:INK});
+  if(sub) txt(x+22,y+64,sub,{'font-size':14,fill:FAINT});
+}
+
+/* ══════════ 一 · 分层爆炸图 ══════════ */
+panel(60,190,1120,810,'一 · 分层爆炸图','自左上（最远）向右下（最近）：7 层，玩法层 L4 锁定 XY 平面');
+
+const PL=[[0,'纸 · 天光',0.02],[1,'月',0.06],[2,'远山',0.14],[3,'雾带',0.28],
+          [4,'玩法层',1.00],[5,'近景墨',1.35],[6,'前景墨',1.80]];
+const PW=400, PH=180, DX=76, DY=46, PX0=210, PY0=630;
+function platePos(i){const k=6-i;return {x:PX0+k*DX, y:PY0-k*DY};}
+
+function bandArt(i,x,y,w,h){
+  const g=el('g',{});
+  const cp=el('clipPath',{id:'cp'+i},g);
+  cp.appendChild(el('rect',{x:x,y:y,width:w,height:h},g));
+  const c=el('g',{'clip-path':'url(#cp'+i+')'},g);
+  const cy=y+h/2;
+  if(i===0) rect(x,y,w,h,{fill:'url(#paper)'},c);
+  if(i===1){
+    rect(x,y,w,h,{fill:'url(#paper)'},c);
+    el('circle',{cx:x+w*0.74,cy:cy+4,r:32,fill:'#FFFFFF',opacity:0.95,filter:'url(#b9)'},c);
+  }
+  if(i===2){
+    rect(x,y,w,h,{fill:'#FBF6EB'},c);
+    [['#6A6759',0.26,4,46],['#545144',0.30,10,56],['#433F36',0.28,16,66],['#3A362E',0.24,22,76]]
+     .forEach(function(L,li){
+      let d='M '+(x-10)+','+(y+h);
+      for(let px=0;px<=w+20;px+=10){
+        const s=px/w;
+        const yy=y+L[3]-Math.abs(Math.sin(s*7.5+li*1.7))*L[2]*4.2-Math.sin(s*19+li)*L[2]*0.5;
+        d+=' L '+(x-10+px)+','+yy.toFixed(1);
+      }
+      d+=' L '+(x+w+10)+','+(y+h)+' Z';
+      el('path',{d:d,fill:L[0],opacity:L[1],filter:'url(#b1)'},c);
+    });
+  }
+  if(i===3){
+    rect(x,y,w,h,{fill:'#F3ECDC'},c);
+    [[0.28,20,0.9],[0.55,15,0.72],[0.79,24,0.84]].forEach(function(L){
+      el('ellipse',{cx:x+w*L[0],cy:cy+(L[0]-0.5)*10,rx:w*0.30,ry:L[1],
+        fill:'#FBF7EE',opacity:L[2],filter:'url(#b9)'},c);
+    });
+  }
+  if(i===4){
+    rect(x,y,w,h,{fill:'#FAF6EC'},c);
+    el('path',{d:'M '+(x-10)+','+(cy+16)+' L '+(x+w+10)+','+(cy+10)+' L '+(x+w+10)+','+(cy+26)+
+      ' L '+(x-10)+','+(cy+30)+' Z',fill:'#26241D',opacity:0.9,filter:'url(#ink)'},c);
+    el('path',{d:'M '+(x-10)+','+(cy+16)+' L '+(x+w+10)+','+(cy+10)+' L '+(x+w+10)+','+(cy+17)+
+      ' L '+(x-10)+','+(cy+23)+' Z',fill:'#100E0B',opacity:0.6},c);
+    el('circle',{cx:x+112,cy:cy+2,r:5,fill:'#3A3830'},c);
+    el('circle',{cx:x+300,cy:cy-4,r:11,fill:'#0B0B08',filter:'url(#b1)'},c);
+    const d='M '+(x+140)+','+(cy-6)+' C '+(x+200)+','+(cy-30)+' '+(x+250)+','+(cy-24)+' '+(x+290)+','+(cy-8);
+    el('path',{d:d,fill:'none',stroke:'#E8B33C','stroke-width':2.4,'stroke-linecap':'round'},c);
+    el('path',{d:d,fill:'none',stroke:'#FFE9A6','stroke-width':0.9},c);
+  }
+  if(i===5){
+    rect(x,y,w,h,{fill:'#FAF6EC'},c);
+    el('path',{d:'M '+(x+w-6)+','+(y+h+10)+' C '+(x+w-70)+','+(y+h-10)+' '+(x+w-120)+','+(y+h-34)+
+      ' '+(x+w-190)+','+(y+h-46)+' L '+(x+w+10)+','+(y+h-58)+' Z',
+      fill:'#26241D',opacity:0.55,filter:'url(#ink)'},c);
+    el('path',{d:'M '+(x-4)+','+(y+h+10)+' C '+(x+70)+','+(y+h-4)+' '+(x+120)+','+(y+h-26)+
+      ' '+(x+186)+','+(y+h-36)+' L '+(x-14)+','+(y+h-50)+' Z',
+      fill:'#26241D',opacity:0.42,filter:'url(#ink)'},c);
+  }
+  if(i===6){
+    rect(x,y,w,h,{fill:'#FAF6EC'},c);
+    [[0.20,56,26,0.32],[0.60,72,28,0.36],[0.86,46,22,0.28]].forEach(function(L){
+      el('ellipse',{cx:x+w*L[0],cy:(L[0]<0.5?y+4:y+h-2),rx:L[1],ry:L[2],
+        fill:'#0B0B08',opacity:L[3],filter:'url(#b9)'},c);
+    });
+    for(let k=0;k<11;k++)
+      el('circle',{cx:x+16+k*36,cy:y+9+((k*23)%28),r:1.6+((k*13)%4),
+        fill:'#0B0B08',opacity:0.30,filter:'url(#b4)'},c);
+  }
+  return g;
+}
+
+for(let i=0;i<7;i++){
+  const p=platePos(i), isKey=(i===4);
+  const g=el('g',{});
+  rect(p.x,p.y,PW,PH,{fill:isKey?'#FDF6E4':'#FDFBF6',opacity:isKey?0.97:0.92,rx:2},g);
+  bandArt(i,p.x,p.y,PW,46);
+  el('rect',{x:p.x,y:p.y,width:PW,height:PH,fill:'none',
+    stroke:isKey?GOLD:MID,'stroke-width':isKey?3.2:1.3,opacity:isKey?1:0.5,rx:2},g);
+  /* 右条：视差速率柱 */
+  const rx=p.x+PW-64, ry=p.y+56, rh=88;
+  rect(rx,ry,50,rh,{fill:'#3E3A2E',opacity:0.08,rx:2},g);
+  const bh=Math.max(1.5,rh*(PL[i][2]/1.8));
+  rect(rx,ry+rh-bh,50,bh,{fill:isKey?GOLD:GOLDB,opacity:isKey?1:0.70,rx:2},g);
+  txt(rx+25,ry+rh+22,PL[i][2].toFixed(2),{'text-anchor':'middle','font-size':17,
+    'font-weight':700,fill:isKey?INK:SOFT},g);
+  txt(rx+25,ry+rh+39,'视差',{'text-anchor':'middle','font-size':11,fill:FAINT},g);
+  /* 徽章 + 层名 */
+  el('circle',{cx:p.x-42,cy:p.y+23,r:16,fill:isKey?GOLD:'#FFFFFF',
+    stroke:isKey?GOLD:MID,'stroke-width':1.6,opacity:isKey?1:0.8},g);
+  txt(p.x-42,p.y+29,'L'+i,{'text-anchor':'middle','font-size':15,'font-weight':700,
+    fill:isKey?'#FFFFFF':MID},g);
+  txt(p.x-66,p.y+29,PL[i][1],{'text-anchor':'end','font-size':16,
+    'font-weight':isKey?700:400,fill:isKey?INK:SOFT},g);
+}
+/* L4 标注：放在所有板之下，避开压叠 */
+(function(){
+  const p=platePos(4);
+  const g=el('g',{});
+  el('path',{d:'M '+(p.x+150)+','+(p.y+PH+6)+' L '+(p.x+150)+','+912+' L '+(p.x+182)+','+930,
+    fill:'none',stroke:GOLD,'stroke-width':1.8,'stroke-dasharray':'6 5'},g);
+  txt(p.x+196,926,'L4 = 玩法层 = 物理平面',{'font-size':19,'font-weight':700,fill:INK},g);
+  txt(p.x+196,952,'视差速率恒为 1.00　·　物理引擎只能看见这一层　·　只有这一层允许有交互反馈',
+    {'font-size':14,fill:SOFT},g);
+})();
+
+/* ══════════ 二 · 层参数 ══════════ */
+panel(1230,190,1110,710,'二 · 层参数','缩放与视差速率为独立手工配置项，均以玩法层 L4 为基准');
+
+(function(){
+  const x0=1252, RH=58, rowTop0=336;
+  const cols=[['层',0],['内容',80],['Z 排序',470],['视差速率',570],['缩放',700],
+              ['高斯模糊',805],['不透明度',925]];
+  rect(x0-12,282,1066,44,{fill:'#3E3A2E',opacity:0.10,rx:2});
+  cols.forEach(function(c){ txt(x0+c[1],310,c[0],{'font-size':15,'font-weight':700,fill:MID}); });
+  const rows=[
+    ['L0','纸 · 天光',                   '+8.0','0.02','屏幕空间','0 px',  '100%'],
+    ['L1','月',                          '+6.5','0.06','0.85',    '10 px', '85%'],
+    ['L2','远山（层内再分 4 条脊线）',    '+5.0','0.14','0.70',    '20 px', '60%'],
+    ['L3','雾带',                        '+3.0','0.28','0.90',    '18 px', '70%'],
+    ['L4','玩法层：角色 / 敌人 / 灵丝 / 可交互物','0','1.00','1.00','0 px','100%'],
+    ['L5','近景墨：遮挡枝 / 断梁前端',    '−2.0','1.35','1.35',    '12 px', '55%'],
+    ['L6','前景墨 · 飞白粒子',            '−4.0','1.80','1.80',    '22 px', '35%']
+  ];
+  rows.forEach(function(r,i){
+    const top=rowTop0+i*RH, ty=top+RH/2+6, key=(r[0]==='L4');
+    if(key) rect(x0-12,top,1066,RH,{fill:GOLD,opacity:0.10,rx:2});
+    else if(i%2===1) rect(x0-12,top,1066,RH,{fill:'#3E3A2E',opacity:0.028,rx:2});
+    if(key) el('rect',{x:x0-12,y:top,width:4,height:RH,fill:GOLD});
+    txt(x0,ty,r[0],{'font-size':19,'font-weight':700,fill:key?INK:MID});
+    txt(x0+80,ty,r[1],{'font-size':15,'font-weight':key?700:400,fill:key?INK:SOFT});
+    [2,3,4,5,6].forEach(function(ci){
+      txt(x0+cols[ci][1],ty,r[ci],{'font-size':ci===3?'17':'15',
+        'font-weight':ci===3?700:400,fill:ci===3?(key?INK:MID):SOFT});
+    });
+    line(x0-12,top+RH,x0+1054,top+RH,{stroke:MID,'stroke-width':0.7,opacity:0.16});
+  });
+  const ny=rowTop0+7*RH+30;
+  txt(x0-12,ny,  '※  Z 仅用于排序与后处理深度，不参与透视缩放（正交相机）。',{'font-size':14,fill:SOFT});
+  txt(x0-12,ny+26,'※  模糊 = 空气透视（越远越糊）＋ 景深（越近也越糊）；最清晰的永远是 L4。',{'font-size':14,fill:SOFT});
+  txt(x0-12,ny+52,'※  L2 远山自身再分 4 条脊线，速率分别为 0.08 / 0.11 / 0.14 / 0.19。',{'font-size':14,fill:SOFT});
+})();
+
+/* ══════════ 三 · 视差剖面 ══════════ */
+panel(60,1040,1120,560,'三 · 视差剖面','镜头右移 100px 时，各层在屏幕上的实际位移');
+
+(function(){
+  const Z=[8.0,6.5,5.0,3.0,0,-2.0,-4.0];
+  const RATE=[0.02,0.06,0.14,0.28,1.00,1.35,1.80];
+  const NAME=['L0 纸','L1 月','L2 远山','L3 雾带','L4 玩法层','L5 近景墨','L6 前景墨'];
+  const bx=200, bw=800;
+  const zx=function(z){ return 200 + ((8.0-z)/12)*800; };
+
+  /* 正交视野框 */
+  el('rect',{x:bx-30,y:1178,width:880,height:34,fill:GOLD,opacity:0.09,
+    stroke:GOLD,'stroke-width':1.4,'stroke-dasharray':'6 5'});
+
+  /* 层板 */
+  Z.forEach(function(z,i){
+    const x=zx(z), key=(i===4);
+    txt(x,1140,NAME[i],{'text-anchor':'middle','font-size':14,'font-weight':key?700:400,
+      fill:key?INK:SOFT});
+    txt(x,1158,'Z '+(z>0?'+':'')+z.toFixed(1),{'text-anchor':'middle','font-size':11,fill:FAINT});
+    line(x,1170,x,1236,{stroke:key?GOLD:MID,'stroke-width':key?4:2,opacity:key?1:0.45});
+  });
+  /* 相机 */
+  (function(){
+    const cx=1092;
+    el('path',{d:'M '+(cx-18)+',1186 L '+cx+',1176 L '+cx+',1214 L '+(cx-18)+',1204 Z',
+      fill:'#3E3A2E',opacity:0.5});
+    rect(cx,1176,50,38,{fill:'#3E3A2E',opacity:0.85,rx:4});
+    txt(cx+16,1240,'正交相机',{'text-anchor':'middle','font-size':13,'font-weight':700,fill:MID});
+    txt(cx+16,1260,'正交视野 · 无透视缩放',{'text-anchor':'middle','font-size':11,fill:GOLD});
+  })();
+  line(bx-40,1236,bx+bw+140,1236,{stroke:MID,'stroke-width':1.2,opacity:0.4});
+
+  /* 位移条 */
+  const y0=1272, RH=36, SCALE=620/180;
+  NAME.forEach(function(nm,i){
+    const y=y0+i*RH, key=(i===4), disp=100*RATE[i], w=Math.max(2,disp*SCALE);
+    txt(bx-14,y+15,nm,{'text-anchor':'end','font-size':14,'font-weight':key?700:400,fill:key?INK:SOFT});
+    rect(bx,y+2,bw,20,{fill:'#3E3A2E',opacity:0.05,rx:2});
+    rect(bx,y+2,w,20,{fill:key?GOLD:GOLDB,opacity:key?1:0.6,rx:2});
+    txt(bx+w+12,y+17,disp.toFixed(0)+' px',{'font-size':14,'font-weight':key?700:400,fill:key?INK:SOFT});
+  });
+  txt(bx-40,y0+7*RH+14,'位移 = 镜头位移 × 视差速率　　L4 恒等于镜头位移 → 玩家看到的物理距离永远为真',
+    {'font-size':14,fill:SOFT});
+})();
+
+/* ══════════ 四 · 相机行为 ══════════ */
+panel(1230,930,1110,400,'四 · 相机行为','正交相机：缩放只用 orthographicSize，绝不用推拉 Z');
+
+(function(){
+  const x0=1252, y0=1074, RH=56;
+  const states=[
+    ['常态','默认','orthographicSize = S₀　·　旋转 0°','—','0.0 s'],
+    ['蓄力','张力 ≥ 60%','orthographicSize = S₀ × 1.30（视野扩大 30%）','ease-out','0.30 s'],
+    ['断丝','断丝瞬间','定格 0.15s ＋ 旋转 ±8° ＋ orthographicSize × 0.94','定格→回正','0.15 + 0.40 s'],
+    ['飞行','物体离手','焦点跟随物体；主角保持在画面边缘内','阻尼','0.12 s'],
+    ['命中','高价值击杀','慢镜 ＋ orthographicSize × 0.85','线性','0.30 s']
+  ];
+  states.forEach(function(s,i){
+    const top=y0+i*RH, ty=top+RH/2+5, key=(i===2);
+    if(key) rect(x0-14,top,1064,RH,{fill:GOLD,opacity:0.10,rx:2});
+    else if(i%2===1) rect(x0-14,top,1064,RH,{fill:'#3E3A2E',opacity:0.028,rx:2});
+    if(key) el('rect',{x:x0-14,y:top,width:4,height:RH,fill:GOLD});
+    txt(x0,ty-2,s[0],{'font-size':19,'font-weight':700,fill:key?INK:MID});
+    txt(x0,ty+18,s[1],{'font-size':12,fill:FAINT});
+    txt(x0+130,ty,s[2],{'font-size':15,fill:SOFT});
+    txt(x0+790,ty,s[3],{'font-size':13,fill:FAINT});
+    txt(x0+920,ty,s[4],{'font-size':15,'font-weight':700,fill:key?INK:MID});
+    line(x0-14,top+RH,x0+1050,top+RH,{stroke:MID,'stroke-width':0.7,opacity:0.16});
+  });
+  txt(x0-14,y0+5*RH+26,'旋转方向 = 断丝方向的法线（顺着甩出去的方向倾），不是随机方向。',
+    {'font-size':14,fill:SOFT});
+})();
+
+/* ══════════ 五 · 铁律 ══════════ */
+panel(1230,1360,1110,240,'五 · 铁律','违反其中任何一条，物理可读性立刻受损');
+
+(function(){
+  const x0=1254, y0=1462;
+  const rules=[
+    ['01','L4 的视差速率恒为 1.00。','任何非 1.00 的值都会让玩家误判物理距离。'],
+    ['02','物理平面永不倾斜。','镜头可以转 8°，但 Box2D 世界永远是 XY 平面。'],
+    ['03','只有 L4 允许有交互反馈。','金色描边、预判线、伤害预读，一律不得出现在其它层。'],
+    ['04','L5 / L6 遮挡玩法层关键区域 ≤ 15%。','前景是调味，不是主菜。'],
+    ['05','缩放只用 orthographicSize。','正交相机下推拉 Z 不改变画面大小，只改变排序。']
+  ];
+  rules.forEach(function(r,i){
+    const y=y0+i*30;
+    txt(x0,y,r[0],{'font-size':14,'font-weight':700,fill:GOLD});
+    txt(x0+34,y,r[1],{'font-size':15,'font-weight':700,fill:INK});
+    txt(x0+440,y,r[2],{'font-size':14,fill:SOFT});
+  });
+})();
+})();
+</script>
+</body>
+</html>

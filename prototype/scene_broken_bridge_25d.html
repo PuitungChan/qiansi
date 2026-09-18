@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>牵丝 · 断桥 2.5D</title>
+<style>
+  html,body{margin:0;padding:0;background:#000;overflow:hidden;}
+  .stage{position:relative;width:1920px;height:1080px;overflow:hidden;
+    background:radial-gradient(125% 105% at 40% 28%, #FFFDF8 0%, #FCF8EE 40%, #F7F1E2 70%, #F0E7D3 100%);}
+  svg{position:absolute;inset:0;width:1920px;height:1080px;}
+  .grain{position:absolute;inset:0;opacity:.04;mix-blend-mode:multiply;}
+</style>
+</head>
+<body>
+<div class="stage">
+  <svg class="grain" viewBox="0 0 1920 1080"><rect width="1920" height="1080" filter="url(#grain)"/></svg>
+  <svg id="S" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="grain" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" seed="9" result="n"/>
+        <feColorMatrix in="n" type="saturate" values="0"/>
+      </filter>
+      <filter id="goo" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="b"/>
+        <feColorMatrix in="b" type="matrix"
+          values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 30 -15" result="g"/>
+        <feTurbulence type="fractalNoise" baseFrequency="0.005 0.008" numOctaves="3" seed="4" result="nz"/>
+        <feDisplacementMap in="g" in2="nz" scale="6" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <filter id="goo2" x="-80%" y="-80%" width="260%" height="260%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="4.5" result="b"/>
+        <feColorMatrix in="b" type="matrix"
+          values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9" result="g"/>
+        <feTurbulence type="fractalNoise" baseFrequency="0.02 0.03" numOctaves="3" seed="8" result="nz"/>
+        <feDisplacementMap in="g" in2="nz" scale="5" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <filter id="wet" x="-25%" y="-25%" width="150%" height="150%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.008 0.021" numOctaves="5" seed="17" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="9" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <filter id="dry" x="-25%" y="-25%" width="150%" height="150%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.05 0.11" numOctaves="4" seed="23" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <filter id="w4" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4"/></filter>
+      <filter id="w10" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="10"/></filter>
+      <filter id="w18" x="-45%" y="-45%" width="190%" height="190%"><feGaussianBlur stdDeviation="18"/></filter>
+      <filter id="w30" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="30"/></filter>
+      <filter id="w52" x="-55%" y="-55%" width="210%" height="210%"><feGaussianBlur stdDeviation="52"/></filter>
+      <filter id="glow" x="-140%" y="-140%" width="380%" height="380%">
+        <feGaussianBlur stdDeviation="7" result="b1"/>
+        <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="b2"/>
+        <feMerge><feMergeNode in="b1"/><feMergeNode in="b1"/>
+                 <feMergeNode in="b2"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="glowsoft" x="-140%" y="-140%" width="380%" height="380%">
+        <feGaussianBlur stdDeviation="3.4" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <linearGradient id="gGold" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#BE8922"/><stop offset="0.42" stop-color="#EDC155"/>
+        <stop offset="1" stop-color="#FFE9A6"/>
+      </linearGradient>
+      <!-- 顶面：左端淡出，整体保持中灰（水平面受光，不该是剪影） -->
+      <linearGradient id="gTop" x1="0" y1="0" x2="1" y2="0.35">
+        <stop offset="0"    stop-color="#6E6A5C" stop-opacity="0.00"/>
+        <stop offset="0.14" stop-color="#66624F" stop-opacity="0.34"/>
+        <stop offset="0.46" stop-color="#5C5849" stop-opacity="0.50"/>
+        <stop offset="0.80" stop-color="#504C40" stop-opacity="0.58"/>
+        <stop offset="1"    stop-color="#46433A" stop-opacity="0.62"/>
+      </linearGradient>
+      <linearGradient id="gFace" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0"    stop-color="#26241D" stop-opacity="0.00"/>
+        <stop offset="0.14" stop-color="#1E1C16" stop-opacity="0.62"/>
+        <stop offset="0.5"  stop-color="#17150F" stop-opacity="0.86"/>
+        <stop offset="1"    stop-color="#100E0B" stop-opacity="0.92"/>
+      </linearGradient>
+      <radialGradient id="gMoon" cx="50%" cy="50%" r="50%">
+        <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0.95"/>
+        <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="vign" cx="40%" cy="32%" r="82%">
+        <stop offset="0.66" stop-color="#2A2416" stop-opacity="0"/>
+        <stop offset="1" stop-color="#2A2416" stop-opacity="0.12"/>
+      </radialGradient>
+    </defs>
+    <g id="world" transform="rotate(-4 960 540)">
+      <g id="L1"></g><g id="L2"></g><g id="L3"></g>
+      <g id="L4"></g>
+      <g id="L5"></g><g id="L6"></g>
+    </g>
+    <g id="ui"></g>
+  </svg>
+</div>
+
+<script>
+(function(){
+const NS='http://www.w3.org/2000/svg';
+const LV={L1:document.getElementById('L1'),L2:document.getElementById('L2'),L3:document.getElementById('L3'),
+          L4:document.getElementById('L4'),L5:document.getElementById('L5'),L6:document.getElementById('L6'),
+          UI:document.getElementById('ui')};
+const R=(function(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}})(20260918);
+function el(tag,at,p){const e=document.createElementNS(NS,tag);
+  for(const k in at) if(at[k]!==''&&at[k]!=null) e.setAttribute(k,at[k]);
+  (p||LV.L4).appendChild(e); return e;}
+const PAPER='#F7F1E2';
+
+/* 斜投影：深度方向（后退 = 右上） */
+const RX=100, RY=-72;
+
+/* ══════════ L2 远山 ══════════ */
+function hProf(x,ph){
+  const a=Math.pow(Math.max(0,Math.sin(x*0.00118+ph)),1.7);
+  const b=Math.pow(Math.max(0,Math.sin(x*0.00267+ph*2.1)),2.4);
+  const c=Math.pow(Math.max(0,Math.sin(x*0.00553+ph*3.3)),3.0);
+  const d=Math.pow(Math.max(0,Math.sin(x*0.01110+ph*4.7)),3.4);
+  return Math.min(1,a*0.62+b*0.42+c*0.26+d*0.14);
+}
+function ridge(topY,baseY,ph,step){
+  let d='M -260,'+baseY;
+  for(let x=-260;x<=2180;x+=step) d+=' L '+x+','+(baseY-hProf(x,ph)*(baseY-topY)).toFixed(1);
+  return d+' L 2180,'+baseY+' Z';
+}
+el('circle',{cx:566,cy:186,r:100,fill:'url(#gMoon)',opacity:0.70},LV.L1);
+el('path',{d:ridge(286,608,0.0,16),fill:'#5D5A4E',opacity:0.36,filter:'url(#w18)'},LV.L2);
+el('path',{d:ridge(342,618,1.7,13),fill:'#4A473C',opacity:0.42,filter:'url(#w18)'},LV.L2);
+el('path',{d:ridge(396,628,3.4,10),fill:'#3E3B33',opacity:0.42,filter:'url(#w10)'},LV.L2);
+el('path',{d:ridge(452,638,5.1,8), fill:'#35322B',opacity:0.34,filter:'url(#w10)'},LV.L2);
+
+/* ══════════ L3 雾带（克制） ══════════ */
+[[980,656,1180,30,.75],[300,700,520,20,.42],[1620,712,560,24,.38]]
+ .forEach(function(m){el('ellipse',{cx:m[0],cy:m[1],rx:m[2],ry:m[3],fill:PAPER,
+   opacity:m[4],filter:'url(#w18)'},LV.L3);});
+
+/* ══════════ L4 玩法层 ══════════ */
+
+/* ── 近侧桥面：顶面 + 前立面 ── */
+const BL=[60,640], BR=[1400,640];
+const FL=[BL[0]-RX,BL[1]-RY], FR=[BR[0]-RX,BR[1]-RY];   /* (−40,712) (1300,712) */
+(function(){
+  const g=el('g',{},LV.L4);
+  /* 顶面 */
+  el('path',{d:'M '+FL[0]+','+FL[1]+' L '+FR[0]+','+FR[1]+' L '+BR[0]+','+BR[1]+' L '+BL[0]+','+BL[1]+' Z',
+    fill:'url(#gTop)',filter:'url(#wet)'},g);
+  /* 石板缝（沿深度方向，刻意做得不齐） */
+  for(let x=-20;x<=1250;x+=104){
+    el('path',{d:'M '+(x+(R()-.5)*26).toFixed(0)+','+FL[1]+' L '+(x+RX+(R()-.5)*26).toFixed(0)+','+BL[1],
+      fill:'none',stroke:'#2A2820','stroke-width':(1+R()*1.5).toFixed(1),
+      opacity:(0.05+R()*0.11).toFixed(2),filter:'url(#dry)'},g);
+  }
+  /* 顶面笔触（让它有墨的质感，而不是一块灰底） */
+  for(let i=0;i<22;i++){
+    const t=R(), y=643+t*66;
+    const x0=-60+R()*1020, x1=x0+260+R()*640;
+    el('path',{d:'M '+x0.toFixed(0)+','+y.toFixed(0)+' L '+Math.min(x1,1310).toFixed(0)+','+(y-R()*18).toFixed(0),
+      fill:'none',stroke:(R()>0.45?'#9A9384':'#2A2820'),'stroke-width':(1.2+R()*5).toFixed(1),
+      'stroke-linecap':'round',opacity:(0.05+R()*0.17).toFixed(2),filter:'url(#dry)'},g);
+  }
+  /* 前立面 */
+  el('path',{d:'M '+FL[0]+','+FL[1]+' L '+FR[0]+','+FR[1]+' L '+FR[0]+','+(FR[1]+46)+
+    ' L '+FL[0]+','+(FL[1]+46)+' Z',fill:'url(#gFace)',filter:'url(#wet)'},g);
+  el('path',{d:'M '+FL[0]+','+(FL[1]+46)+' C 300,'+(FL[1]+58)+' 800,'+(FL[1]+40)+' '+FR[0]+','+(FR[1]+50),
+    fill:'none',stroke:'#0F0D0A','stroke-width':6,opacity:0.40,filter:'url(#dry)'},g);
+  /* 右端崩口 */
+  [[6,0.44],[4,0.30],[2.6,0.22]].forEach(function(s,k){
+    el('path',{d:'M '+(FR[0]-46+k*12)+','+(FR[1]-10+k*8)+' L '+(FR[0]+30+k*6)+','+(FR[1]-30+k*10),
+      fill:'none',stroke:'#100E0B','stroke-width':s[0],'stroke-linecap':'round',
+      opacity:s[1],filter:'url(#dry)'},g);
+  });
+})();
+
+/* ── 对岸岩台（右移，留出峡谷） ── */
+const FBL=[1620,664], FBR=[2130,664];
+const FFL=[FBL[0]-RX,FBL[1]-RY], FFR=[FBR[0]-RX,FBR[1]-RY];  /* (1560,736) (2070,736) */
+(function(){
+  const g=el('g',{},LV.L4);
+  el('path',{d:'M '+FFL[0]+','+FFL[1]+' L '+FFR[0]+','+FFR[1]+' L '+FBR[0]+','+FBR[1]+' L '+FBL[0]+','+FBL[1]+' Z',
+    fill:'url(#gTop)',filter:'url(#wet)'},g);
+  for(let x=1480;x<=2060;x+=110)
+    el('path',{d:'M '+x+','+FFL[1]+' L '+(x+RX)+','+FBL[1],fill:'none',stroke:'#2A2820',
+      'stroke-width':(1+R()*1.8).toFixed(1),opacity:(0.09+R()*0.14).toFixed(2),filter:'url(#dry)'},g);
+  el('path',{d:'M '+FFL[0]+','+FFL[1]+' L '+FFR[0]+','+FFR[1]+' L '+FFR[0]+','+(FFR[1]+56)+
+    ' L '+FFL[0]+','+(FFL[1]+56)+' Z',fill:'url(#gFace)',filter:'url(#wet)'},g);
+  el('path',{d:'M '+FFL[0]+','+(FFL[1]+56)+' C 1720,'+(FFL[1]+68)+' 1950,'+(FFL[1]+52)+' '+FFR[0]+','+(FFR[1]+60),
+    fill:'none',stroke:'#0F0D0A','stroke-width':6,opacity:0.38,filter:'url(#dry)'},g);
+})();
+
+/* ── 断裂梁柱（带侧面） ── */
+function column(x0,x1,y0,y1){
+  const g=el('g',{},LV.L4);
+  el('path',{d:'M '+x1+','+y0+' L '+(x1+18)+','+(y0-13)+' L '+(x1+18)+','+(y1-13)+' L '+x1+','+y1+' Z',
+    fill:'#141210',opacity:0.88,filter:'url(#wet)'},g);
+  el('path',{d:'M '+x0+','+(y0+6)+' C '+((x0+x1)/2)+','+y0+' '+x1+','+(y0+4)+' '+x1+','+y0+
+    ' L '+x1+','+y1+' L '+x0+','+y1+' Z',fill:'#26241D',filter:'url(#wet)'},g);
+  for(let i=0;i<11;i++){
+    const x=x0+R()*(x1-x0), a=y0+R()*40, b=y1-R()*40;
+    el('path',{d:'M '+x.toFixed(1)+','+a.toFixed(1)+' L '+(x+(R()-.5)*9).toFixed(1)+','+b.toFixed(1),
+      fill:'none',stroke:(R()>0.45?'#5A564A':'#0F0D0A'),'stroke-width':(1.4+R()*4.5).toFixed(1),
+      'stroke-linecap':'round',opacity:(0.07+R()*0.18).toFixed(2),filter:'url(#dry)'},g);
+  }
+}
+column(668,778,46,640);
+column(868,970,122,468);
+column(880,970,532,640);
+[['M 668,46 C 706,34 744,30 778,46',10,0.36],['M 868,122 C 902,112 936,110 970,122',9,0.34],
+ ['M 872,468 C 902,486 942,454 970,476',11,0.48],['M 886,532 C 916,520 946,516 970,518',9,0.44]]
+ .forEach(function(s){el('path',{d:s[0],fill:'none',stroke:'#100E0B','stroke-width':s[1],
+   'stroke-linecap':'round',opacity:s[2],filter:'url(#wet)'},LV.L4);});
+
+/* ── 落在地面上的投影（沿深度方向偏移，强化顶面） ── */
+function deckShadow(cx,baseY,w,op){
+  el('ellipse',{cx:cx+RX*0.45,cy:baseY+RY*0.45+10,rx:w,ry:12,fill:'#100E0B',
+    opacity:op,filter:'url(#w10)'},LV.L4);
+}
+deckShadow(723,640,70,0.30); deckShadow(919,640,60,0.26);
+deckShadow(1790,664,120,0.24);
+
+/* ── 悬吊铁链 ── */
+(function(){
+  const g=el('g',{filter:'url(#wet)',opacity:0.56},LV.L4);
+  el('path',{d:'M 452,-30 C 472,124 456,256 474,404',fill:'none',stroke:'#232019',
+    'stroke-width':'6.2','stroke-linecap':'round'},g);
+  for(let i=0;i<10;i++)
+    el('ellipse',{cx:458+Math.sin(i*0.9)*8,cy:26+i*42,rx:8.4,ry:14,fill:'none',
+      stroke:'#232019','stroke-width':'4.1',opacity:0.9},g);
+})();
+
+/* ── 无相 · 墨甲 ── */
+(function(){
+  const g=el('g',{transform:'translate(-40,0)'},LV.L4);
+  el('ellipse',{cx:1830,cy:556,rx:164,ry:98,fill:'#0B0B08',opacity:0.08,filter:'url(#w18)'},g);
+  const body=el('g',{filter:'url(#goo)'},g);
+  [[1830,528,88],[1766,572,56],[1900,570,54],[1794,474,50],[1882,476,48],[1830,430,40],
+   [1722,562,24],[1952,558,22],[1830,600,64],[1740,608,48],[1920,606,46]]
+   .forEach(function(c){el('circle',{cx:c[0],cy:c[1],r:c[2],fill:'#0B0B08'},body);});
+  const f=el('g',{fill:'none',stroke:'#9E9B92','stroke-linecap':'round',opacity:0.19},g);
+  el('path',{d:'M1828,404 C1866,420 1892,446 1898,482','stroke-width':'3'},f);
+  el('path',{d:'M1764,446 C1772,476 1782,506 1796,534','stroke-width':'2.3'},f);
+  el('path',{d:'M1778,560 C1812,578 1850,578 1880,560','stroke-width':'1.9'},f);
+  el('path',{d:'M1830,404 L1830,450 M1826,492 L1820,542','stroke-width':'1.4',opacity:0.7},f);
+  el('circle',{cx:1848,cy:550,r:11,fill:'#8A7748',opacity:0.20,filter:'url(#w4)'},g);
+  const sp=el('g',{filter:'url(#goo2)'},g);
+  [[1660,442,14],[1620,404,10],[1590,472,8],[1648,508,7],[1556,432,6],[1576,372,5]]
+   .forEach(function(c,i){el('circle',{cx:c[0],cy:c[1],r:c[2],fill:'#0B0B08',
+     opacity:(0.86-i*0.10).toFixed(2)},sp);});
+  const st=el('g',{stroke:'#0B0B08','stroke-linecap':'round',opacity:0.22},g);
+  el('path',{d:'M1746,488 L1668,438',fill:'none','stroke-width':'2.8'},st);
+  el('path',{d:'M1734,540 L1650,514',fill:'none','stroke-width':'1.9'},st);
+  el('path',{d:'M1770,456 L1700,394',fill:'none','stroke-width':'1.4'},st);
+  el('ellipse',{cx:1830,cy:660,rx:146,ry:11,fill:'#0B0B08',opacity:0.13,filter:'url(#w4)'},g);
+  const m=el('g',{filter:'url(#goo2)'},g);
+  [[2010,642,16],[2050,650,10],[1978,652,9]]
+   .forEach(function(c){el('circle',{cx:c[0],cy:c[1],r:c[2],fill:'#0B0B08'},m);});
+})();
+
+/* ── 弹道 ── */
+el('path',{d:'M364,508 Q875,148 1122.6,352.5',fill:'none',stroke:'#2A2822',
+  'stroke-width':11,opacity:0.05,filter:'url(#w4)','stroke-linecap':'round'},LV.L4);
+el('path',{d:'M364,508 Q875,148 1122.6,352.5',fill:'none',stroke:'#2A2822',
+  'stroke-width':2,opacity:0.18,'stroke-dasharray':'1 12','stroke-linecap':'round'},LV.L4);
+el('path',{d:'M1122.6,352.5 Q1424,392.8 1790,556',fill:'none',stroke:'#E8B33C',
+  'stroke-width':3.6,opacity:0.26,'stroke-dasharray':'1 20','stroke-linecap':'round',
+  filter:'url(#glowsoft)'},LV.L4);
+el('path',{d:'M1122.6,352.5 Q1424,392.8 1790,556',fill:'none',stroke:'#FFEDB8',
+  'stroke-width':2.2,opacity:0.95,'stroke-dasharray':'1 21','stroke-dashoffset':'1',
+  'stroke-linecap':'round'},LV.L4);
+el('circle',{cx:1790,cy:556,r:26,fill:'none',stroke:'#E8B33C','stroke-width':1.6,opacity:0.38},LV.L4);
+el('circle',{cx:1790,cy:556,r:42,fill:'none',stroke:'#E8B33C','stroke-width':1,opacity:0.20},LV.L4);
+
+/* ── 石块 ── */
+(function(){
+  const S=el('g',{transform:'translate(-18,0)'},LV.L4);
+  [[1090,344,21,.11],[1038,337,17,.07],[990,331,13,.05]].forEach(function(c){
+    el('circle',{cx:c[0],cy:c[1],r:c[2],fill:'#3A382F',opacity:c[3]},S);});
+  el('path',{d:'M1141,352 Q1076,341 1016,330',fill:'none',stroke:'#EDC155',
+    'stroke-width':1.8,opacity:0.72,filter:'url(#glowsoft)'},S);
+  [[994,320],[998,341],[1000,325]].forEach(function(p){
+    el('path',{d:'M1016,330 L'+p[0]+','+p[1],fill:'none',stroke:'#EDC155','stroke-width':1.1,
+      opacity:0.54,'stroke-linecap':'round'},S);});
+  el('path',{d:'M1115,329 L1149,323 L1167,337 L1173,359 L1159,381 L1131,387 L1107,375 L1099,353 Z',
+    fill:'#575347',filter:'url(#dry)'},S);
+  el('path',{d:'M1115,329 L1149,323 L1167,337 L1145,341 L1119,349 L1105,359 L1099,353 Z',
+    fill:'#7C7767',opacity:0.52,filter:'url(#dry)'},S);
+  el('path',{d:'M1101,355 L1107,375 L1131,387 L1159,381 L1167,367 L1153,381 L1129,385 L1109,373 Z',
+    fill:'#312F28',opacity:0.62,filter:'url(#dry)'},S);
+})();
+
+/* ── 主角 ── */
+(function(){
+  const g=el('g',{transform:'translate(-36,-11) scale(1.12)'},LV.L4);
+  const b=el('g',{filter:'url(#dry)'},g);
+  el('path',{d:'M287,484 C281,508 275,530 269,550 C261,562 254,570 248,578 L360,578 '+
+    'C354,568 347,559 341,549 C334,529 327,506 319,484 Z',fill:'#3A3830'},b);
+  el('path',{d:'M268,506 C290,513 328,513 348,504 L350,518 C330,527 288,527 266,520 Z',
+    fill:'#1C1A15',opacity:0.55},b);
+  el('path',{d:'M272,552 C286,566 300,574 316,576',fill:'none',stroke:'#77725F','stroke-width':1.5,opacity:0.30},b);
+  el('path',{d:'M296,548 C308,564 322,572 336,574',fill:'none',stroke:'#77725F','stroke-width':1.5,opacity:0.22},b);
+  el('path',{d:'M290,496 C276,504 264,512 252,524',fill:'none',stroke:'#3A3830',
+    'stroke-width':11,'stroke-linecap':'round'},g);
+  el('circle',{cx:250,cy:526,r:5.5,fill:'#2B2922'},g);
+  el('path',{d:'M296,478 L312,478 L312,484 L296,484 Z',fill:'#2A2822'},g);
+  el('circle',{cx:304,cy:464,r:15,fill:'#3A3830'},g);
+  el('path',{d:'M288,460 C292,441 318,439 322,458 C324,467 319,473 317,470 '+
+    'C312,457 296,457 292,470 C290,473 287,467 288,460 Z',fill:'#1B1914'},g);
+  el('path',{d:'M289,468 C279,484 275,502 277,520',fill:'none',stroke:'#1B1914',
+    'stroke-width':3,'stroke-linecap':'round',opacity:0.66},g);
+  el('path',{d:'M318,494 C332,484 348,470 360,456',fill:'none',stroke:'#3A3830',
+    'stroke-width':12,'stroke-linecap':'round'},g);
+  el('circle',{cx:364,cy:446,r:5,fill:'#FFEDB8',filter:'url(#glow)'},g);
+})();
+
+/* ── 灵丝 · 已断回抽 ── */
+(function(){
+  const d='M364,508 C466,454 566,404 672,358 C716,338 750,320 774,303';
+  el('path',{d:d,fill:'none',stroke:'#E8B33C','stroke-width':9,opacity:0.30,
+    'stroke-linecap':'round',filter:'url(#glow)'},LV.L4);
+  el('path',{d:d,fill:'none',stroke:'url(#gGold)','stroke-width':2.8,
+    'stroke-linecap':'round',filter:'url(#glowsoft)'},LV.L4);
+  el('path',{d:d,fill:'none',stroke:'#FFF6D4','stroke-width':0.9,opacity:0.85,
+    transform:'translate(0,1.7)'},LV.L4);
+  [[798,288],[802,306],[792,321],[788,297],[794,314]].forEach(function(p){
+    el('path',{d:'M774,303 L'+p[0]+','+p[1],fill:'none',stroke:'#EDC155','stroke-width':1.3,
+      opacity:0.85,'stroke-linecap':'round'},LV.L4);});
+  el('circle',{cx:774,cy:303,r:7,fill:'#FFEDB8',opacity:0.5,filter:'url(#glow)'},LV.L4);
+})();
+
+/* ══════════ L5 近景墨（模糊 12px） ══════════ */
+(function(){
+  /* 左下：一截断梁探入前景，压住画面左下角 */
+  el('path',{d:'M -180,884 L 322,824 L 384,880 L -180,1014 Z',fill:'#24221B',
+    opacity:0.58,filter:'url(#w10)'},LV.L5);
+  el('path',{d:'M -180,914 L 280,860 L 318,894 L -180,988 Z',fill:'#141210',
+    opacity:0.46,filter:'url(#w10)'},LV.L5);
+  /* 右上：一根垂下的墨枝，只框住画面上缘，不压玩法区 */
+  el('path',{d:'M 1700,-70 C 1756,46 1724,130 1780,208 C 1806,244 1794,280 1756,304 '+
+    'L 1736,292 C 1772,268 1780,248 1756,212 C 1700,136 1732,54 1682,-70 Z',
+    fill:'#2A2820',opacity:0.46,filter:'url(#w10)'},LV.L5);
+  el('path',{d:'M 1884,-70 C 1910,40 1878,120 1912,196 L 1894,204 C 1862,128 1892,50 1866,-70 Z',
+    fill:'#2A2820',opacity:0.34,filter:'url(#w10)'},LV.L5);
+})();
+
+/* ══════════ L6 前景墨 · 飞白粒子（模糊 22px） ══════════ */
+(function(){
+  el('ellipse',{cx:40,cy:1104,rx:460,ry:150,fill:'#0B0B08',opacity:0.26,filter:'url(#w30)'},LV.L6);
+  el('ellipse',{cx:2020,cy:-40,rx:300,ry:230,fill:'#0B0B08',opacity:0.16,filter:'url(#w52)'},LV.L6);
+  for(let k=0;k<16;k++)
+    el('circle',{cx:R()*2040-60,cy:R()*1160-40,r:3+R()*11,fill:'#0B0B08',
+      opacity:(0.05+R()*0.11).toFixed(2),filter:'url(#w30)'},LV.L6);
+})();
+
+/* ══════════ HUD（屏幕空间，不随相机滚转） ══════════ */
+(function(){
+  const U=LV.UI;
+  el('text',{x:54,y:86,'font-family':'STKaiti,KaiTi,楷体,serif','font-size':25,
+    fill:'#4A463A',opacity:0.72},U).textContent='丝';
+  [[116,1],[164,1],[212,0],[260,0]].forEach(function(d){
+    if(d[1]){el('circle',{cx:d[0],cy:77,r:13,fill:'#E8B33C',filter:'url(#glowsoft)'},U);
+             el('circle',{cx:d[0],cy:77,r:13,fill:'none',stroke:'#8A6D24','stroke-width':1},U);}
+    else el('circle',{cx:d[0],cy:77,r:13,fill:'none',stroke:'#8A6D24','stroke-width':1.6,opacity:0.4},U);
+  });
+  const g=el('g',{transform:'translate(56,962)'},U);
+  el('text',{x:0,y:-14,'font-family':'STKaiti,KaiTi,楷体,serif','font-size':21,
+    fill:'#4A463A',opacity:0.7},g).textContent='张力';
+  el('rect',{x:0,y:0,width:230,height:7,rx:3.5,fill:'#3E3A2E',opacity:0.13},g);
+  el('rect',{x:0,y:0,width:179,height:7,rx:3.5,fill:'#E8B33C',filter:'url(#glowsoft)'},g);
+  el('path',{d:'M218,0 L218,7',stroke:'#A03A2A','stroke-width':2.4,opacity:0.55},g);
+  el('text',{x:226,y:9,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':12,
+    fill:'#A03A2A',opacity:0.72},g).textContent='濒断';
+  el('text',{x:0,y:32,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':13,
+    fill:'#6E6858'},g).textContent='78%';
+  const g2=el('g',{transform:'translate(1126,300)'},U);
+  el('path',{d:'M-14,4 L22,-38',stroke:'#4A463A','stroke-width':1,opacity:0.30},g2);
+  el('rect',{x:16,y:-80,width:158,height:48,rx:2,fill:'#FCF9F2',opacity:0.92,
+    stroke:'#8A8272','stroke-width':1},g2);
+  el('text',{x:31,y:-56,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':16,
+    fill:'#3E3A2E'},g2).textContent='冲击';
+  el('text',{x:80,y:-54,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':24,
+    'font-weight':700,fill:'#1F1D17'},g2).textContent='24';
+  el('text',{x:31,y:-42,'font-family':'Microsoft YaHei,微软雅黑,sans-serif','font-size':12,
+    fill:'#7A7466'},g2).textContent='对墨甲 · 有效';
+  /* 命名属于画面内容，随世界滚转 */
+  const g3=el('g',{opacity:0.94,transform:'rotate(-4 960 540)'},U);
+  el('text',{x:1478,y:222,'text-anchor':'middle',
+    'font-family':'STXingkai,华文行楷,KaiTi,楷体,STKaiti,serif','font-size':130,fill:'#1A1813'},g3)
+    .textContent='一石';
+  el('path',{d:'M1380,252 L1576,252',stroke:'#C08A24','stroke-width':1.8,opacity:0.72},g3);
+  el('text',{x:1478,y:288,'text-anchor':'middle','font-family':'Microsoft YaHei,微软雅黑,sans-serif',
+    'font-size':18,fill:'#4A463A','letter-spacing':8},g3).textContent='单 次 投 石 击 杀';
+  el('text',{x:1866,y:1024,'text-anchor':'end','font-family':'STKaiti,KaiTi,楷体,serif',
+    'font-size':24,fill:'#3E3A2E',opacity:0.5,'letter-spacing':6},U).textContent='第一章 · 断桥';
+  el('rect',{x:0,y:0,width:1920,height:1080,fill:'url(#vign)'},U);
+})();
+})();
+</script>
+</body>
+</html>
