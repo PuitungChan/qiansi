@@ -157,8 +157,16 @@ export const ROPE_ATTACH_TOLERANCE = 1.2
  * 点击不再是唯一手段。
  */
 export const ROPE_HIT_RADIUS_M = 34 / PPM
-/** 撞击伤害的最小接近速度（m/s）：低于此值视为"贴上去"而不是"砸上去"。 */
+/** 撞击**反馈**的最小接近速度（m/s）：低于此值视为"贴上去"而不是"砸上去"，不产生撞击事件。 */
 export const MIN_IMPACT_SPEED = 0.5
+/**
+ * 造成**伤害**的最小接近速度（m/s）。
+ *
+ * 与 `MIN_IMPACT_SPEED` 分工不同：那个管"有没有接触反馈（音效/表现）"，这个管"算不算砸到"。
+ * 取 6 —— 至少要比主角自己的走速（6 m/s）快，才配叫"砸过去"。
+ * 实机反馈：「只要石头碰到了敌人就会造成伤害」→ 见 D-037。
+ */
+export const MIN_DAMAGE_SPEED = 6
 
 // ── 撞击 / 伤害 ───────────────────────────────────────
 /** 冲击伤害要求 m_eff ≥ 3，否则目标纹丝不动。设计 §2.5 */
@@ -179,8 +187,22 @@ export const NEST_CORE_MULTIPLIER = 3
 export const SOLVER_ITERATIONS = 8
 /** 位置修正的容许穿透（m）。 */
 export const SLOP = 0.002
-/** 位置修正比例（Baumgarte）。 */
-export const BAUMGARTE = 0.25
+/**
+ * 位置修正比例（Baumgarte）。
+ *
+ * 从 0.25 提到 0.8 是**必须的**：自 D-032 起丝线有一条**刚性位置约束**，
+ * 它每 tick 把两端精确钉在目标距离上。如果碰撞分离只修正 25%，刚性约束每次都赢，
+ * 被顶到墙上的墨甲与石块就会稳定地互相嵌进去（实测穿透 **0.236m**，而石块半径才 0.5）。
+ * 见 D-036。
+ */
+export const BAUMGARTE = 0.8
+/**
+ * 位置层的交替迭代次数：**丝线刚性约束 ⇄ 碰撞分离**。
+ *
+ * 两条都是位置约束，各自解一次是不够的——必须交替迭代才会同时收敛。
+ * 固定次数 ⇒ 确定性不受影响。刚体数量很小（M0 只有 7 具），代价可忽略。
+ */
+export const POSITION_ITERATIONS = 4
 /** 默认恢复系数与摩擦系数（灰盒）。 */
 export const DEFAULT_RESTITUTION = 0.05
 export const DEFAULT_FRICTION = 0.6

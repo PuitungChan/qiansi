@@ -206,13 +206,18 @@ export class World {
     this.applyForces(p)
     this.integrateVelocities()
     this.integratePositions()
-    // 丝线的刚性约束：张力到顶时把两端钉在"目标丝长 + 弹性余量"上（D-032）。
-    // 放在位置积分之后、碰撞之前 —— 它和碰撞一样是**位置层**的约束。
-    this.solveRopeConstraints()
+    // 位置层约束：**丝线刚性约束 ⇄ 碰撞分离交替迭代**。
+    // 两条都是位置约束，只各解一次的话刚性那条每次都赢 —— 被顶到墙上的敌人与石块
+    // 会稳定地互相嵌进去（实测穿透 0.236m）。见 D-036。
+    for (let it = 0; it < C.POSITION_ITERATIONS; it++) {
+      this.solveRopeConstraints()
+      this.detectContacts()
+      this.correctPositions()
+    }
+    // 用最终位置重新取一次接触集：速度求解、伤害判定、着地判定都以它为准
     this.detectContacts()
     this.emitContacts()
     this.solveVelocities()
-    this.correctPositions()
     this.updateGrounded()
     this.updateIgnoreFlags()
     for (const b of this.bodies) refreshDerived(b)
@@ -587,6 +592,19 @@ export class World {
     if (target === null || attacker === null) return
     if (!target.alive || target.maxHp <= 0) return
 
+    // ── 门槛 ①：**还牵在手上的东西不造成伤害**（D-037）──────────────
+    //
+    // 设计 §2.3 原文：「**断丝 = 攻击。**」——攻击动作本身就是"松手"。
+    // 不设这一条的话，玩家只要把石块收到敌人身上慢慢磨就能击杀，
+    // 而"甩过去砸"就不再是唯一解法，整个投石的技巧空间被绕过去了。
+    if (this.isHeld(attacker)) return
+
+    // ── 门槛 ②：蹭到不算砸到（D-037）───────────────────────────
+    //
+    // `MIN_IMPACT_SPEED`（0.5）负责"有没有接触反馈"，这里负责"算不算伤害"。
+    // 取 6 m/s —— 至少要比主角的走速（6 m/s）快，才配叫"砸过去"。
+    if (speed < C.MIN_DAMAGE_SPEED) return
+
     // 注意：用 **damageMass**（设计口径的固有质量），而不是当前有效质量。
     // 主角着地时有效质量是 1e6，若拿它算伤害，走路撞一下就能秒掉墨甲——
     // 与设计「主角质量 0.5，不产生力量」直接冲突。
@@ -612,6 +630,18 @@ export class World {
       target.alive = false
       this.events.push({ kind: 'killed', target: target.id, at })
     }
+  }
+
+  /**
+   * 该刚体当前是否被某根丝牵住。
+   * 用于伤害门槛 ① ——「断丝 = 攻击」（设计 §2.3），牵在手上的东西不算武器。
+   * 主动断丝后丝位立刻进入 `recovering` 且 `targetId` 清空，所以本函数随即返回 false。
+   */
+  private isHeld(b: Body): boolean {
+    for (const r of this.ropes) {
+      if (r.state === 'attached' && r.targetId === b.id) return true
+    }
+    return false
   }
 
   // ── 9. 顺序冲量求解 ─────────────────────────────────

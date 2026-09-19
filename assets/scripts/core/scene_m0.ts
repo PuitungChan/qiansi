@@ -130,6 +130,12 @@ export class M0Scenario {
     })
 
     // ── 墨甲：质量 20，HP 30，弱点是动量 mv（设计 §4.1 / 附录 B）──
+    //
+    // ⚠️ `anchorable: false` —— **R1 阶段不能把丝牵到敌人身上**。
+    // 依据设计 §5 心法表：「**墨丝**（第四章中）—— 可以附着于「无相」本体 →
+    // 打开的技术空间：甩动敌人打敌人（双截棍）」。也就是说"牵敌人"是第四章才解锁的能力，
+    // 在此之前敌人不是可附着目标。
+    // （曾误设为 true，创始人在第 5 轮实机反馈中指出。见 DECISIONS D-038。）
     const armor = w.addBody({
       name: 'armor',
       kind: 'dynamic',
@@ -139,7 +145,7 @@ export class M0Scenario {
       mass: 20,
       friction: 0.5,
       restitution: 0.05,
-      anchorable: true,
+      anchorable: false,
       hp: 30,
       weakness: 'impact',
     })

@@ -256,6 +256,53 @@ test('主角仍然会与敌人碰撞（豁免只针对 prop）', () => {
   )
 })
 
+test('D-037 被丝牵住的物体不造成伤害（「断丝 = 攻击」，设计 §2.3）', () => {
+  const sc = new M0Scenario()
+  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  // 把墨甲搬到主角右侧，然后把石块收到它身上
+  sc.armor.pos = { x: sc.player.pos.x + 2, y: 0.81 }
+  let damageWhileHeld = 0
+  for (let i = 0; i < 120; i++) {
+    sc.step(input({ reel: 'in' }))
+    for (const e of sc.world.events) {
+      if (e.kind === 'damage' && e.target === sc.armor.id) damageWhileHeld += e.amount
+    }
+  }
+  assert.equal(damageWhileHeld, 0, '牵在手上的石块不该造成任何伤害')
+  assert.equal(sc.armor.hp, 30)
+
+  // 断丝之后同一颗石块撞上去才算数
+  sc.stone.vel = { x: 20, y: 0 }
+  sc.step(input({ cutRope: 0 }))
+  let damageAfterCut = 0
+  for (let i = 0; i < 40; i++) {
+    sc.step(NO_INPUT)
+    for (const e of sc.world.events) {
+      if (e.kind === 'damage' && e.target === sc.armor.id) damageAfterCut += e.amount
+    }
+  }
+  assert.ok(damageAfterCut > 0, '断丝之后才应该造成伤害')
+})
+
+test('D-037 蹭到不算砸到：低于最小伤害速度不产生伤害', () => {
+  const { world } = flatScene({}, { playerX: -40 })
+  const armor = addEnemy(world, { x: 4, mass: 20, hp: 30, weakness: 'impact' })
+  const stone = addProp(world, { x: 2, mass: 4 })
+  stone.pos = { x: 2, y: 0.51 }
+  stone.vel = { x: 3, y: 0 } // 3 m/s < MIN_DAMAGE_SPEED(6)
+  for (let i = 0; i < 60; i++) world.step(NO_INPUT)
+  assert.equal(armor.hp, 30, '慢速蹭上去不该掉血')
+})
+
+test('D-036 敌人不可被丝线附着（「墨丝」心法第四章才解锁，设计 §5）', () => {
+  const sc = new M0Scenario()
+  assert.equal(sc.armor.anchorable, false)
+  // 站在墨甲旁边试着牵它 → 不该连上
+  sc.player.pos = { x: sc.armor.pos.x - 2, y: sc.player.pos.y }
+  sc.step(input({ aimPoint: { x: sc.armor.pos.x, y: sc.armor.pos.y }, attachPressed: true }))
+  assert.equal(sc.world.ropes[0]!.state, 'idle', 'R1 阶段不该能牵住敌人')
+})
+
 test('D-033 断丝时物体若在主角体内，不应把主角撞飞（实机反馈 #4）', () => {
   const sc = new M0Scenario()
   sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))

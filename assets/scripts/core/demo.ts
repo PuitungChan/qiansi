@@ -181,7 +181,9 @@ export function runDemo(): DemoResult {
 
   for (let i = 0; i < frames.length; i++) {
     sc.step(frames[i]!)
-    if (i === plan.releaseTick - 1) {
+    // 断丝**那一刻之后**测速：这才是真正被甩出去的速度。
+    // （若在断丝前一刻测，测到的是"丝还在拉"的状态，与飞出速度不是一回事。）
+    if (i === plan.releaseTick) {
       releaseSpeed = Math.hypot(sc.stone.vel.x, sc.stone.vel.y)
     }
     for (const e of sc.world.events) {
