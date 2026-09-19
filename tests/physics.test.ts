@@ -215,6 +215,47 @@ test('D-032 拉紧时：主角离地且物体更重 ⇒ 主角被拉过去', () 
   assert.ok(Math.abs(player.pos.x - px0) > 1, '离地主角应被更重的物体拉走')
 })
 
+test('D-035 主角与 prop 类物体一律不碰撞（可以走过去）', () => {
+  const { world, player } = flatScene({}, { playerX: 0 })
+  const stone = addProp(world, { x: 3, mass: 4 })
+
+  const sx0 = stone.pos.x
+  for (let i = 0; i < 180; i++) world.step(input({ moveX: 1 }))
+
+  // 主角走了完整的 18m（3 秒 × 6 m/s）——石块不再挡路
+  assert.ok(
+    player.pos.x > 17,
+    `主角不该被石块挡住，实际走了 ${player.pos.x.toFixed(2)}m（理论 18m）`,
+  )
+  // 石块也不该被推着跑
+  assert.ok(
+    Math.abs(stone.pos.x - sx0) < 0.5,
+    `石块不该被推着走，实际位移 ${(stone.pos.x - sx0).toFixed(2)}`,
+  )
+})
+
+test('主角仍然会与敌人碰撞（豁免只针对 prop）', () => {
+  // 对照实验：同一个位置放 prop 与放敌人，主角走过去的结果必须不同
+  const a = flatScene({}, { playerX: 0 })
+  const propA = addProp(a.world, { x: 3, mass: 4 })
+  for (let i = 0; i < 120; i++) a.world.step(input({ moveX: 1 }))
+
+  const b = flatScene({}, { playerX: 0 })
+  const enemyB = addEnemy(b.world, { x: 3, mass: 20, hp: 30, weakness: 'impact' })
+  for (let i = 0; i < 120; i++) b.world.step(input({ moveX: 1 }))
+
+  // prop：被完全穿过，自己纹丝不动
+  assert.ok(
+    Math.abs(propA.pos.x - 3) < 0.5,
+    `prop 不该被推动，实际位移 ${(propA.pos.x - 3).toFixed(2)}`,
+  )
+  // 敌人：碰撞生效，被主角推着走（着地的主角等效质量 ∞，推得动 20 质量的墨甲）
+  assert.ok(
+    enemyB.pos.x > 3.5,
+    `敌人应被推动（碰撞生效），实际 ${enemyB.pos.x.toFixed(2)}`,
+  )
+})
+
 test('D-033 断丝时物体若在主角体内，不应把主角撞飞（实机反馈 #4）', () => {
   const sc = new M0Scenario()
   sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))

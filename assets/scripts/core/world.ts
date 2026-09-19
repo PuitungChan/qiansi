@@ -515,9 +515,14 @@ export class World {
 
         if (a.tag === 'player' || b.tag === 'player') {
           const other = a.tag === 'player' ? b : a
-          // ① 正被牵住 ⇒ 豁免（D-027）
+          // ① 主角与 **prop 类物体一律不碰撞**（D-035，取代 D-027）。
+          //    一是"小石块挡住去路"（实机反馈 #6），二是被牵物体常常在主角体内、
+          //    断丝瞬间会被求解器猛推出去把主角撞飞（反馈 #4）。两者一次解决。
+          //    prop 是可以随手摆弄的东西，不该成为地形。
+          if (other.tag === 'prop') continue
+          // ② 正被牵住 ⇒ 豁免（D-027 的残留，对敌人等非 prop 仍然适用）
           if (held.has(other.id)) continue
-          // ② 刚脱离且仍在主角体内 ⇒ 豁免，直到分开（D-033，实机反馈 #4）
+          // ③ 刚脱离且仍在主角体内 ⇒ 豁免，直到分开（D-033）
           if (other.ignorePlayer) continue
         }
 

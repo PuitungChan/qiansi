@@ -75,6 +75,15 @@ export class PlayerInput {
   private reelPulse = 0
   private reelPulseDir: ReelCommand = 'hold'
 
+  /**
+   * 指针来源仲裁：**谁先按下谁独占**，另一来源在这次按下期间的事件全部忽略。
+   * 用于消除"鼠标与触摸同时派发"导致的重复处理（见触屏一节的说明）。
+   */
+  private activePointer: 'none' | 'mouse' | 'touch' = 'none'
+  /** 触摸 id：左半屏摇杆 / 右半屏瞄准各跟踪一根手指，不再靠坐标判断归属。 */
+  private joystickId: number | null = null
+  private aimTouchId: number | null = null
+
   /** 最近一次指针所在的世界坐标（画瞄准线用）。 */
   aimWorld: { x: number; y: number } | null = null
 
@@ -137,6 +146,9 @@ export class PlayerInput {
   // ── 鼠标 ────────────────────────────────────────────
 
   private onMouseDown(e: EventMouse): void {
+    // 触摸正独占（有手指按着）⇒ 忽略鼠标，避免同一次输入被处理两遍
+    if (this.activePointer === 'touch') return
+
     const button = e.getButton()
 
     // 右键 = 断丝（就近一根）。这是第 3 轮实机反馈后的**主手段**：
@@ -148,6 +160,7 @@ export class PlayerInput {
     }
 
     if (button !== EventMouse.BUTTON_LEFT) return
+    this.activePointer = 'mouse'
     const loc = e.getUILocation()
     const p = this.mouse
     p.down = true
@@ -160,6 +173,8 @@ export class PlayerInput {
   }
 
   private onMouseMove(e: EventMouse): void {
+    // 触摸正独占 ⇒ 忽略鼠标移动，别去改写触摸维护的指针状态
+    if (this.activePointer === 'touch') return
     const loc = e.getUILocation()
     const p = this.mouse
     p.x = loc.x
@@ -177,6 +192,7 @@ export class PlayerInput {
     if (!p.down) return
     const loc = e.getUILocation()
     p.down = false
+    if (this.activePointer === 'mouse') this.activePointer = 'none'
     const heldMs = nowMs() - p.downAt
     if (p.dragged) {
       // 拖拽松手 = 牵（FR-ACT-005）
@@ -200,11 +216,29 @@ export class PlayerInput {
   }
 
   // ── 触屏 ────────────────────────────────────────────
+  //
+  // ⚠️ 第 4 轮实机反馈 #1「按住左键瞄准时人物自己滑了」的根因就在这一段。
+  //
+  // 两个缺陷叠加：
+  //   ① 摇杆状态会**卡死**：`onTouchEnd` 原先按"抬起点在哪一半屏"来分支，
+  //      手指从左半屏划到右半屏再抬起时，走的是右半屏分支，`touch.down` 永远留在 true。
+  //      之后 `sample()` 每 tick 都按摇杆偏移算 moveX ⇒ **主角自己一直滑**。
+  //   ② 鼠标与触摸可能**同时到达**：一旦平台同时派发两套事件，左半屏按住左键拖拽
+  //      就既在"瞄准"又在"推摇杆"，于是"瞄准时人被拉/滑走"。
+  //
+  // 修法：用**指针来源仲裁**（谁先按下谁独占，另一个来源的事件在此次按下期间全部忽略）
+  // + 用**触摸 id** 跟踪两根手指，不再靠"当前坐标在哪一半屏"来判断归属。
 
   private onTouchStart(e: EventTouch): void {
+    // 独占仲裁：鼠标已经按着的时候，忽略触摸（视为同一次输入的重复派发）
+    if (this.activePointer === 'mouse') return
+    this.activePointer = 'touch'
+
     const loc = e.getUILocation()
+    const id = e.getID()
     if (loc.x < VIEW_W / 2) {
-      // 左半屏 = 虚拟摇杆
+      if (this.joystickId !== null) return // 摇杆已被另一根手指占用
+      this.joystickId = id
       const t = this.touch
       t.down = true
       t.startX = loc.x
@@ -215,6 +249,8 @@ export class PlayerInput {
       t.dragged = false
       return
     }
+    if (this.aimTouchId !== null) return
+    this.aimTouchId = id
     const p = this.mouse
     p.down = true
     p.startX = loc.x
@@ -227,13 +263,17 @@ export class PlayerInput {
   }
 
   private onTouchMove(e: EventTouch): void {
+    const id = e.getID()
     const loc = e.getUILocation()
-    if (loc.x < VIEW_W / 2 && this.touch.down) {
+
+    if (id === this.joystickId) {
       this.touch.x = loc.x
       this.touch.y = loc.y
       this.touch.dragged = true
       return
     }
+    if (id !== this.aimTouchId) return
+
     const p = this.mouse
     p.x = loc.x
     p.y = loc.y
@@ -245,11 +285,23 @@ export class PlayerInput {
   }
 
   private onTouchEnd(e: EventTouch): void {
+    const id = e.getID()
     const loc = e.getUILocation()
-    if (loc.x < VIEW_W / 2) {
+
+    if (id === this.joystickId) {
+      // 关键修复：无论手指在哪里抬起，摇杆状态都必须清掉
+      this.joystickId = null
       this.touch.down = false
+      if (this.aimTouchId === null) this.activePointer = 'none'
       return
     }
+    if (id !== this.aimTouchId) return
+
+    this.aimTouchId = null
+    if (this.activePointer === 'touch' && this.joystickId === null) {
+      this.activePointer = 'none'
+    }
+
     const p = this.mouse
     p.down = false
     this.aiming = false
@@ -257,7 +309,7 @@ export class PlayerInput {
     if (p.dragged) {
       this.pendingAttach = new CcVec2(loc.x, loc.y)
     } else if (heldMs >= HOLD_MS) {
-      // 按住不放 = 收丝（设计 §3.1）；松手时补一拍，手感上不会"提前停"
+      // 按住不放 = 收丝（设计 §3.1）
       this.reelPulseDir = 'in'
       this.reelPulse = 2
     } else {
