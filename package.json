@@ -1,0 +1,21 @@
+{
+  "name": "qiansi",
+  "uuid": "6f1c2a94-7d3e-4b58-9a10-2c5e8b7f0d31",
+  "version": "0.2.0",
+  "creator": {
+    "version": "3.8.6"
+  },
+  "type": "2d",
+  "private": true,
+  "description": "《牵丝》——单机 2D 物理动作游戏。零依赖确定性物理内核 + Cocos Creator 3.x 渲染层。",
+  "scripts": {
+    "lint": "node tests/lint-architecture.mjs",
+    "test": "node tests/lint-architecture.mjs && node --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/register.mjs tests/run.mjs",
+    "test:isolated": "node --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/register.mjs --test \"tests/*.test.ts\"",
+    "replay:hash": "node --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/register.mjs tests/replay-hash.ts"
+  },
+  "engines": {
+    "node": ">=22.6"
+  },
+  "license": "UNLICENSED"
+}

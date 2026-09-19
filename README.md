@@ -9,14 +9,17 @@
 
 | 项 | 状态 |
 |---|---|
-| 阶段 | **立项 / 等待开工** |
-| 当前里程碑 | M0 尚未开始 |
+| 阶段 | **R1 / M0 已交付，等待真机试玩判定** |
+| 当前里程碑 | M0 物理原型 —— 代码完成，判定点是**你本人**说「我还想再甩一下」 |
 | 设计 | ✅ 完成（v1.0） |
 | 需求 | ✅ 完成（SRS v1.1，234 条需求） |
 | 视觉规范 | ✅ 完成（v1.0） |
 | 原型图 | ✅ 3 张（2D / 2.5D / 分层规范） |
-| 工程代码 | ⬜ 未开始 |
+| 工程代码 | ✅ **M0 内核（64 项自动化测试全绿）+ Cocos 适配层**；Cocos 侧未编译验证 |
 | 美术资源 | ⬜ 未开始（R1 不需要） |
+
+> **下一步看这里** → [`docs/M0_装配说明.md`](docs/M0_装配说明.md)
+> （3 步装配 + 操作表 + 试玩要看的 5 件事 + 我验证了什么/没验证什么）
 
 ---
 
@@ -50,28 +53,42 @@ QianSi/
 ├── README.md                    本文件
 ├── DECISIONS.md                 决策记录（重要！跨会话上下文靠它）
 ├── CHANGELOG.md                 交付变更记录
+├── package.json                 Cocos 工程清单 + 本机测试脚本（`npm test`）
 ├── .gitignore / .gitattributes
+│
+├── assets/                      ★ 工程源码
+│   └── scripts/
+│       ├── core/                确定性物理内核（纯 TypeScript，**零引擎依赖**）
+│       │   ├── vec2 · body · collide · world      刚体与求解器
+│       │   ├── rope                                    丝线：张力模型 + Verlet 绳索
+│       │   ├── damage                                  伤害三公式（弱点择一）
+│       │   ├── aim                                     预判线
+│       │   ├── input · hash                            输入帧 + 状态哈希（AC-05）
+│       │   ├── scene_m0 · demo                         M0 房间装配 + 可回放演示
+│       │   └── constants                               全部手感数值的唯一落点
+│       └── cocos/               引擎适配层（只有这一层认识 `cc`）
+│           ├── Bootstrap.ts                            入口组件（固定步长累加器）
+│           ├── GrayboxRenderer.ts                      灰盒渲染
+│           ├── PlayerInput.ts                          键鼠 + 触屏 → InputFrame
+│           ├── DebugPanel.ts                           调试面板文案
+│           └── Coordinates.ts                          世界坐标 ↔ 屏幕坐标
+│
+├── tests/                       本机可跑的验证（`npm test`，64 项）
+│   ├── damage · rope · physics · aim · scene_m0 · demo
+│   ├── determinism               AC-05 确定性回归
+│   └── lint-architecture.mjs     core/ 零外部依赖的架构红线
 │
 ├── docs/                        设计与需求文档
 │   ├── 牵丝_游戏设计方案.md         设计文档 v1.0
 │   ├── 牵丝_画面视觉规范.md         视觉规范 v1.0
 │   ├── SRS_牵丝_v1.0.md           需求规格说明书 v1.1（234 条）
-│   ├── 需求追踪矩阵.md              追踪矩阵（人读）
-│   ├── 需求追踪矩阵.csv             追踪矩阵（机读，可导入 Jira/Excel）
+│   ├── 需求追踪矩阵.md / .csv       追踪矩阵
 │   ├── 项目交接准备清单.md          交接与开工准备
-│   └── Gitee_协作规范.md           本仓库的协作流程
+│   ├── M0_装配说明.md              ★ M0 怎么跑起来、怎么看、我验证了什么
+│   ├── Gitee_协作规范.md           协作流程
+│   └── GitHub_与双远程方案.md       双远程仓库方案
 │
-├── prototype/                   视觉原型（开发用，非最终素材）
-│   ├── scene_broken_bridge.png      2D 版断桥
-│   ├── scene_broken_bridge_25d.png  2.5D 版断桥（同场景对照）
-│   ├── layers_25d_spec.png          2.5D 分层与相机规范图
-│   └── *.html                       上述图的可编辑源文件
-│
-└── （待建）R1 工程
-    ├── assets/                  Cocos Creator 资源（唯一需要提交的源）
-    ├── settings/                项目设置
-    ├── extensions/              自定义扩展
-    └── package.json
+└── prototype/                   视觉原型（开发用，非最终素材）
 ```
 
 ---
@@ -85,8 +102,12 @@ QianSi/
 3. `docs/SRS_牵丝_v1.0.md` §1–§6 —— 需求与验收标准
 4. `docs/需求追踪矩阵.md` §5 —— 高风险追踪点
 5. `docs/项目交接准备清单.md` —— 开工需要什么
+6. `DECISIONS.md` —— **已做出的全部决策与「为什么不做某事」**（跨会话的唯一记忆）
+7. `docs/M0_装配说明.md` —— 把 M0 跑起来，以及"我验证了什么 / 没验证什么"
 
 **只想看图**：`prototype/` 下的三张 PNG。
+
+**只想跑测试**：`npm test`（零依赖，Node ≥ 22.6，不需要装任何东西）
 
 ---
 
