@@ -233,6 +233,83 @@ Gitee Go 也能做，但额度和生态都弱一些。
 
 ## 8. 常见问题
 
+### 8.0 【已发生】GitHub 推送被拒：`! [rejected] main -> main (fetch first)`
+
+**症状**：Gitee 推上去了，GitHub 报
+
+```
+! [rejected]        main -> main (fetch first)
+error: failed to push some refs to 'git@github.com:...'
+hint: Updates were rejected because the remote contains work that you do
+hint: not have locally.
+```
+
+**原因**：建 GitHub 仓库时勾了「Initialize this repository with a README」（或 .gitignore / license）。
+远端因此多了一个本地没有的提交，git 拒绝覆盖。
+
+**⚠️ 关键**：这种情况下 **`git pull origin main` 是没用的** ——
+双远程配置里 `origin` 的 **fetch 走的是 Gitee**，不是 GitHub。必须显式指定 GitHub。
+
+---
+
+#### ✅ 方案 A（推荐）：删掉 GitHub 仓库重建
+
+GitHub 上那个提交只是自动生成的 README，没有价值。重建最干净。
+
+1. GitHub → 仓库页 → `Settings` → 拉到最底 `Danger Zone` → `Delete this repository`
+2. `New repository`，名字仍填 `qiansi`
+   **⚠️ 所有初始化选项一个都不要勾**（Add a README / Add .gitignore / Choose a license）
+3. 回本地：
+
+```cmd
+cd /d D:\AICoding\QianSi
+git push origin main
+```
+
+完成。`origin` 的两个 push 地址会同时收到。
+
+---
+
+#### 方案 B：保留远端内容并合并
+
+如果 GitHub 上已经有值得保留的东西：
+
+```cmd
+cd /d D:\AICoding\QianSi
+
+:: 从 GitHub 拉取（不带 push 语义，用专门的 github 远程）
+git pull github main --allow-unrelated-histories -X ours
+
+:: 推送（两个平台一起）
+git push origin main
+```
+
+`-X ours` 表示冲突时以本地为准（比如两边都有 `README.md`，会保留我们的）。
+
+**代价**：会产生一个 `Merge ... into main` 的提交，对全新项目来说历史不够干净。
+**所以推荐方案 A。**
+
+---
+
+#### 验证
+
+```cmd
+git log --oneline -3
+git remote -v
+```
+
+期望 `git remote -v` 显示：
+
+```
+origin  git@gitee.com:<user>/qiansi.git (fetch)
+origin  git@gitee.com:<user>/qiansi.git (push)
+origin  git@github.com:<user>/qiansi.git (push)
+github  git@github.com:<user>/qiansi.git (fetch)   ← 备用，用于单独操作 GitHub
+github  git@github.com:<user>/qiansi.git (push)
+```
+
+---
+
 | 问题 | 答案 |
 |---|---|
 | 两边都能推，冲突怎么办？ | 正常情况不会。fetch 只走 Gitee，所以以 Gitee 为准。真要同步，`git push --all github` 单独推 |
