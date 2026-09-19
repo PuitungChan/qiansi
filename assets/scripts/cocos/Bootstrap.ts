@@ -25,6 +25,7 @@ import {
   Graphics,
   KeyCode,
   Label,
+  Layers,
   Node,
   ResolutionPolicy,
   UITransform,
@@ -89,10 +90,27 @@ export class QiansiBootstrap extends Component {
     view.setDesignResolutionSize(VIEW_W, VIEW_H, ResolutionPolicy.FIXED_HEIGHT)
 
     this.assertUnderCanvas()
-    this.buildNodes()
+
+    // 先建渲染节点，再建场景：万一后面的东西抛错，你至少能看到房间。
+    this.buildRenderNode()
+
     this.playerInput = new PlayerInput()
     this.scenario = new M0Scenario({ ropeCount: this.ropeCount })
     this.demoTicks = demoScript().length
+
+    // 调试面板是**非必需**的：它出问题不该导致"整个游戏看不见"。
+    try {
+      this.buildDebugLabel()
+    } catch (err) {
+      this.showDebug = false
+      console.warn('[牵丝] 调试面板创建失败，已自动关闭（不影响游戏本体）：', err)
+    }
+
+    // 这行日志是给你排查用的：**看到它 = 脚本编译并运行了**；看不到 = 脚本压根没跑起来。
+    console.log(
+      `[牵丝] QiansiBootstrap 已启动：tick 固定 ${(1 / DT).toFixed(0)}Hz，` +
+        `房间 ${VIEW_W / 60}×${VIEW_H / 60}m。若画面仍然空白，请把控制台报错发我。`,
+    )
   }
 
   /**
@@ -121,13 +139,26 @@ export class QiansiBootstrap extends Component {
     this.playerInput?.dispose()
   }
 
-  private buildNodes(): void {
+  /**
+   * 渲染节点。**这是整个画面能不能显示出来的关键一步。**
+   *
+   * ⚠️ 坑（v0.2.0 的首个实机反馈）：Cocos 里 `new Node()` 创建的节点默认在
+   * `Layers.Enum.DEFAULT`（`1<<30`）层，而 Canvas 自带相机的 `visibility` 是
+   * `UI_2D | UI_3D`（`41943040`）——**两者不匹配，画的东西会被相机整个剔除，屏幕全空**。
+   * 编辑器里手工创建的节点会被自动赋成 UI_2D，所以这个坑只在**运行时代码建节点**时出现，
+   * 而且什么错都不报，只是看不见。必须显式 `layer = Layers.Enum.UI_2D`。
+   */
+  private buildRenderNode(): void {
     const gfxNode = new Node('Graybox')
+    gfxNode.layer = Layers.Enum.UI_2D
     gfxNode.parent = this.node
     gfxNode.setPosition(0, 0, 0)
     this.gfx = gfxNode.addComponent(Graphics)
+  }
 
+  private buildDebugLabel(): void {
     const labelNode = new Node('DebugPanel')
+    labelNode.layer = Layers.Enum.UI_2D
     labelNode.parent = this.node
     const ui = labelNode.addComponent(UITransform)
     ui.setAnchorPoint(0, 1)
@@ -135,6 +166,7 @@ export class QiansiBootstrap extends Component {
     labelNode.setPosition(-950, 530, 0)
     this.label = labelNode.addComponent(Label)
     this.label.string = ''
+    this.label.useSystemFont = true
     this.label.fontSize = 15
     this.label.lineHeight = 18
     this.label.horizontalAlign = Label.HorizontalAlign.LEFT

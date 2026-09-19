@@ -67,12 +67,27 @@ export class GrayboxRenderer {
   draw(g: Graphics, sc: M0Scenario, opts: RenderOptions): void {
     g.clear()
 
+    this.drawBackground(g)
     this.drawTerrain(g, sc)
     this.drawBodies(g, sc)
     this.drawRopes(g, sc)
     if (opts.aimPoint !== null) this.drawAim(g, sc, opts.aimPoint)
     if (opts.showPrediction) this.drawPrediction(g, sc, opts.prediction)
     this.drawHud(g, sc)
+  }
+
+  /**
+   * 全屏底色。**刻意画得比屏幕大**（8000×6000 px，覆盖到 21:9 都够）。
+   *
+   * 为什么需要它：Canvas 自带相机的 `clearFlags` 默认只清深度、**不清颜色**
+   * （实测场景里是 `6 = DEPTH|STENCIL`），背景色其实是场景里那台 3D `Main Camera`
+   * 提供的。2D 灰盒用不到那台相机，一旦删掉就没人清屏了。
+   * 自己铺一层底，画面就与"场景里有没有别的相机"彻底解耦。
+   */
+  private drawBackground(g: Graphics): void {
+    g.fillColor = C.bg
+    g.rect(-4000, -3000, 8000, 6000)
+    g.fill()
   }
 
   // ── 地形 ────────────────────────────────────────────
