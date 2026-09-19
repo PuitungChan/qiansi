@@ -53,6 +53,8 @@ export type PrologueStage =
   | 'tutorial'
   /** 3:00–5:00：墨卒入场，**零提示** */
   | 'encounter'
+  /** 5:00–8:00：质量差教学（重梁柱 vs 轻陶罐），**零提示** */
+  | 'massdiff'
 
 interface Spawn {
   readonly body: Body
@@ -70,6 +72,17 @@ export class PrologueScene implements PlayableScene {
   readonly jar: Body
   /** 第一个敌人。设计 §7 3:00–5:00，质量 1 / HP 5（附录 B「一下死，它是教学工具」）。 */
   readonly mote: Body
+  /**
+   * **梁柱**（设计 §2.6 / §7 5:00–8:00）：名义质量 60 的不可动结构。
+   * 连上它收丝 → **你被拉过去**（"重的东西用来移动"）。
+   */
+  readonly beam: Body
+  /**
+   * **轻陶罐**（设计 §7 5:00–8:00）：质量 0.6，可附着。
+   * 连上它收丝 → **它被拉过来**（"轻的东西用来打"）。
+   * 与梁柱构成"质量差"的对照——这一幕**不需要任何文字**。
+   */
+  readonly pot: Body
 
   /** AC-01 埋点（D-042）。 */
   readonly telemetry = new Telemetry()
@@ -77,6 +90,7 @@ export class PrologueScene implements PlayableScene {
   private stage: PrologueStage = 'tutorial'
   private hints: HintState = createHintState()
   private encounterCountdown = -1
+  private massDiffCountdown = -1
   private glowLatched = false
   private attachedSinceEncounter = false
 
@@ -187,10 +201,46 @@ export class PrologueScene implements PlayableScene {
     })
     mote.removed = true
 
+    // ── 梁柱：**不可动的结构**（设计 §2.6 定性为"锚点与移动手段"）────
+    //
+    // 为什么 static：见 constants.ts 里 BEAM_* 的推导——设计 §2.2 与 §7
+    // 在"谁被拉过去"上互相矛盾，取 §2.6 的定性（它是锚点）才能让 §7 成立。
+    //
+    // 为什么横在高处（y≈13）而不是竖在地上：
+    // ① 竖在地上的柱子会挡住墨卒的行走路线与投掷弹道；
+    // ② 从下方收丝时，拉力有明显向上分量 → 玩家**被拽离地面** →
+    //    "离地"状态与后续的摆荡才有起点（设计 §4.2 摆荡要求"离地状态"）。
+    const beam = w.addBody({
+      name: 'beam',
+      kind: 'static',
+      tag: 'static',
+      shape: aabb(C.BEAM_HALF_W, C.BEAM_HALF_H),
+      pos: { x: C.BEAM_CENTER_X, y: C.BEAM_CENTER_Y },
+      damageMass: C.BEAM_DAMAGE_MASS, // 名义质量 60（静态刚体的 mass 是 0）
+      friction: 0.4,
+      anchorable: true,
+    })
+
+    // ── 轻陶罐：质量差教学的"轻"那一端（5:00 才给出，先 removed）──
+    const pot = w.addBody({
+      name: 'pot',
+      kind: 'dynamic',
+      tag: 'prop',
+      shape: circle(C.POT_RADIUS),
+      pos: { x: C.POT_SPAWN_X, y: C.POT_RADIUS + 0.01 },
+      mass: C.POT_MASS,
+      friction: C.PROP_FRICTION,
+      restitution: 0.1,
+      anchorable: true,
+    })
+    pot.removed = true
+
     this.player = player
     this.stone = stone
     this.jar = jar
     this.mote = mote
+    this.beam = beam
+    this.pot = pot
     this.spawns.push(
       { body: ground, x: ground.pos.x, y: ground.pos.y, removed: false },
       { body: ceil, x: ceil.pos.x, y: ceil.pos.y, removed: false },
@@ -200,6 +250,8 @@ export class PrologueScene implements PlayableScene {
       { body: stone, x: stone.pos.x, y: stone.pos.y, removed: false },
       { body: jar, x: jar.pos.x, y: jar.pos.y, removed: false },
       { body: mote, x: mote.pos.x, y: mote.pos.y, removed: true },
+      { body: beam, x: beam.pos.x, y: beam.pos.y, removed: false },
+      { body: pot, x: pot.pos.x, y: pot.pos.y, removed: true },
     )
 
     w.settle(12)
@@ -220,10 +272,18 @@ export class PrologueScene implements PlayableScene {
     this.telemetry.consume(this.world, input)
   }
 
-  /** 教学阶段 → 遭遇战。见文件头"进度门控"的说明。 */
+  /** 教学阶段 → 遭遇战 → 质量差。见文件头"进度门控"的说明。 */
   private advanceStage(): void {
-    if (this.stage !== 'tutorial') return
+    if (this.stage === 'tutorial') {
+      this.advanceFromTutorial()
+      return
+    }
+    if (this.stage === 'encounter') {
+      this.advanceFromEncounter()
+    }
+  }
 
+  private advanceFromTutorial(): void {
     if (this.encounterCountdown < 0) {
       if (hintStep(this.hints) !== 'done') return
       this.encounterCountdown = ENCOUNTER_DELAY_TICKS
@@ -239,6 +299,33 @@ export class PrologueScene implements PlayableScene {
     this.mote.pos = { x: C.MOTE_SPAWN_X, y: 0.41 }
     this.mote.vel = { x: 0, y: 0 }
     this.telemetry.startEncounter(this.world.tick)
+  }
+
+  /**
+   * 遭遇战结束 → 质量差。
+   *
+   * 结束条件是**墨卒被击杀**，或者**到了设计给的两分钟上限**（`ENCOUNTER_MAX_SEC`）。
+   * 后者是为了**不卡死**：一个没打死墨卒的试玩者不该永远停在这一段、看不到后面的内容。
+   * 它**不影响 AC-01 的判定**——`ac01Seconds()` 仍然只认"60 秒内、用石块"。
+   */
+  private advanceFromEncounter(): void {
+    if (this.massDiffCountdown < 0) {
+      const elapsedSec = (this.world.tick - this.encounterStartTick()) / C.TICK_HZ
+      const done = !this.mote.alive || elapsedSec >= C.ENCOUNTER_MAX_SEC
+      if (!done) return
+      this.massDiffCountdown = ENCOUNTER_DELAY_TICKS
+      return
+    }
+
+    this.massDiffCountdown--
+    if (this.massDiffCountdown > 0) return
+
+    // 质量差段：给出轻陶罐（梁柱一直在场上，它是结构）
+    this.stage = 'massdiff'
+    this.pot.removed = false
+    this.pot.pos = { x: C.POT_SPAWN_X, y: C.POT_RADIUS + 0.01 }
+    this.pot.vel = { x: 0, y: 0 }
+    this.telemetry.markStage(this.world.tick, 'massdiff')
   }
 
   /**
@@ -349,6 +436,7 @@ export class PrologueScene implements PlayableScene {
     this.hints = createHintState()
     this.stage = 'tutorial'
     this.encounterCountdown = -1
+    this.massDiffCountdown = -1
     this.glowLatched = false
     this.attachedSinceEncounter = false
     this.telemetry.clear()
@@ -359,16 +447,18 @@ export class PrologueScene implements PlayableScene {
     const w = this.world
     const r0 = w.ropes[0]
     return {
-      scene: `序章·批2（${this.stage}）`,
+      scene: `序章·批3（${this.stage}）`,
       tick: w.tick,
       playerX: this.player.pos.x,
+      playerY: this.player.pos.y,
       playerGrounded: this.player.grounded ? 1 : 0,
       playerMass: this.player.mass,
       stoneX: this.stone.pos.x,
-      stoneSpeed: Math.hypot(this.stone.vel.x, this.stone.vel.y),
       jarBroken: this.jarBroken ? 1 : 0,
       moteX: this.mote.removed ? '(未入场)' : this.mote.pos.x,
       moteHp: this.mote.removed ? '-' : this.mote.hp,
+      pot: this.pot.removed ? '(未给出)' : this.pot.pos.x,
+      beam: `${C.BEAM_CENTER_X},${C.BEAM_CENTER_Y} m=${C.BEAM_DAMAGE_MASS}`,
       ropeState: r0?.state ?? 'none',
       ropeTension: r0?.tension ?? 0,
       hint: this.hint() ?? '(无)',

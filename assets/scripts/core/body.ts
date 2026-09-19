@@ -157,6 +157,14 @@ export interface BodyInit {
   weakness?: Weakness
   /** 死亡时碎裂消失（陶罐等易碎场景物）。见 `shattersOnDeath`。 */
   shattersOnDeath?: boolean
+  /**
+   * **名义质量**。
+   *
+   * 静态刚体的 `mass` 是 0（不参与动力学），但有些静态物体在**语义上是有质量**的——
+   * 例如设计 §2.6 的「梁柱 60」。伤害计算与可读性都要用这个数，所以单独给一个口子。
+   * 不传时默认等于 `mass`（动态刚体传不传都一样）。
+   */
+  damageMass?: number
 }
 
 export function createBody(init: BodyInit): Body {
@@ -173,7 +181,7 @@ export function createBody(init: BodyInit): Body {
     vel: init.vel ?? { x: 0, y: 0 },
     mass,
     invMass: isStatic || mass === 0 ? 0 : 1 / mass,
-    damageMass: mass,
+    damageMass: init.damageMass ?? mass,
     restitution: init.restitution ?? DEFAULT_RESTITUTION,
     friction: init.friction ?? DEFAULT_FRICTION,
     grounded: false,

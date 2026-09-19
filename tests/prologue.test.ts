@@ -8,6 +8,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as C from '../assets/scripts/core/constants'
 import { MOTE_STOP_DISTANCE, ROPE_RECONGEAL_SEC } from '../assets/scripts/core/constants'
 import { createHintState, hintStep, hintText } from '../assets/scripts/core/hints'
 import { input } from '../assets/scripts/core/input'
@@ -15,22 +16,31 @@ import { PROLOGUE, PrologueScene } from '../assets/scripts/core/scene_prologue'
 import { TEXTS, totalTextLength } from '../assets/scripts/core/texts'
 import { NO_INPUT } from './helpers'
 
-test('序章刚开局只包含设计 §7 那几样东西（空场景 + 一块石头 + 一个陶罐 + 待入场的墨卒）', () => {
+test('序章刚开局只包含设计 §7 那几样东西', () => {
   const sc = new PrologueScene()
   assert.deepEqual(
     sc.world.bodies.map((b) => b.name),
-    ['ground', 'ceiling', 'wall-left', 'wall-right', 'player', 'stone', 'jar', 'mote'],
+    ['ground', 'ceiling', 'wall-left', 'wall-right', 'player', 'stone', 'jar', 'mote', 'beam', 'pot'],
   )
-  // 墨卒在构造时就占好 id（**数组下标就是刚体 id，不能中途 push**），但开局是 removed
+  // 墨卒与轻陶罐在构造时就占好 id（**数组下标就是刚体 id，不能中途 push**），
+  // 但开局都是 removed —— 它们各自在 3:00 / 5:00 才"给出"。
   assert.equal(sc.mote.removed, true, '开局墨卒不该在场')
+  assert.equal(sc.pot.removed, true, '开局轻陶罐不该在场')
+  // 梁柱是**结构**，一直在场上（它同时是后续摆荡的锚点）
+  assert.equal(sc.beam.removed, false)
+  assert.equal(sc.beam.kind, 'static')
   assert.equal(sc.currentStage, 'tutorial', '开局是教学阶段')
-  assert.equal(
-    sc.world.findByTag('enemy').length,
-    1,
-    '墨卒已建好但不在场（removed）',
-  )
   assert.equal(sc.world.ropes.length, 1, '序章从 1 根丝开始（设计 §3.3）')
   assert.equal(sc.player.grounded, true)
+})
+
+test('批 3：梁柱的名义质量 60、轻陶罐 0.6（设计 §2.6 / §7）', () => {
+  const sc = new PrologueScene()
+  assert.equal(sc.beam.damageMass, 60, '梁柱名义质量 60（设计 §7 原文）')
+  assert.equal(sc.beam.kind, 'static', '梁柱是"锚点与移动手段"（设计 §2.6），不是可甩物体')
+  assert.equal(sc.beam.anchorable, true, '必须可附着，否则"连梁柱"无从谈起')
+  assert.equal(sc.pot.damageMass, 0.6, '轻陶罐质量 0.6')
+  assert.equal(sc.pot.anchorable, true, '轻陶罐必须可附着，才能做质量差对照')
 })
 
 test('序章参数与设计 §2.6 的质量表一致', () => {
@@ -319,4 +329,115 @@ test('批 2 reset：墨卒回到"未入场"，埋点清空', () => {
   assert.equal(sc.currentStage, 'tutorial')
   assert.equal(sc.telemetry.length, 0)
   assert.equal(sc.telemetry.encounterStarted, false)
+})
+
+// ══════════════════════════════════════════════════════════
+//  批 3：5:00–8:00 质量差（重梁柱 vs 轻陶罐）
+// ══════════════════════════════════════════════════════════
+
+/** 进入遭遇战。 */
+function toEncounter(sc: PrologueScene): void {
+  learnThreeVerbs(sc)
+  for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
+  assert.equal(sc.currentStage, 'encounter')
+}
+
+/** 用石块砸死墨卒（模拟一次成功的投石）。 */
+function killMote(sc: PrologueScene): void {
+  sc.stone.pos = { x: sc.mote.pos.x - 3, y: 0.6 }
+  sc.stone.vel = { x: 20, y: 0 }
+  for (let i = 0; i < 80; i++) sc.step(NO_INPUT)
+  assert.equal(sc.moteDead, true)
+}
+
+test('批 3：墨卒被击杀后，进入质量差段并给出轻陶罐（设计 §7 5:00）', () => {
+  const sc = new PrologueScene()
+  toEncounter(sc)
+  assert.equal(sc.pot.removed, true, '质量差段之前不该有轻陶罐')
+
+  killMote(sc)
+  for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
+
+  assert.equal(sc.currentStage, 'massdiff')
+  assert.equal(sc.pot.removed, false, '轻陶罐应已给出')
+  assert.ok(sc.telemetry.stageStartSec('massdiff') !== null, '埋点应记下段落切换')
+})
+
+test('批 3：质量差段**也是零文字提示**（设计 §7「这一幕不需要任何文字」）', () => {
+  const sc = new PrologueScene()
+  toEncounter(sc)
+  killMote(sc)
+  for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
+  assert.equal(sc.currentStage, 'massdiff')
+  assert.equal(sc.hint(), null)
+  assert.equal(sc.glowBodyId(), -1, '这段也没有发光提示——物理自己会说话')
+})
+
+test('批 3：**连梁柱 → 收丝 → 自己被拉了过去**（设计 §7 原文）', () => {
+  const sc = new PrologueScene()
+  toEncounter(sc)
+  killMote(sc)
+  for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
+
+  // 走到够得着横梁的位置（梁横在 x=10..26、y≈13）
+  for (let i = 0; i < 90; i++) sc.step(input({ moveX: 1 }))
+  const x0 = sc.player.pos.x
+  const y0 = sc.player.pos.y
+
+  // 瞄准梁的**边缘**（不是中心）也应该连得上——大物体必须按表面算
+  sc.step(
+    input({
+      aimPoint: { x: C.BEAM_CENTER_X - C.BEAM_HALF_W, y: C.BEAM_CENTER_Y - C.BEAM_HALF_H },
+      attachPressed: true,
+    }),
+  )
+  assert.equal(sc.world.ropes[0]!.state, 'attached', '瞄准梁的边缘就该连得上')
+  assert.equal(sc.world.ropes[0]!.targetId, sc.beam.id)
+
+  let airborne = false
+  for (let i = 0; i < 180; i++) {
+    sc.step(input({ reel: 'in' }))
+    if (!sc.player.grounded) airborne = true
+  }
+
+  assert.ok(airborne, '连梁柱收丝应该把主角**拽离地面**（"重的东西用来移动"）')
+  assert.ok(
+    sc.player.pos.y > y0 + 1,
+    `主角应被明显拉上去：y ${y0.toFixed(1)} → ${sc.player.pos.y.toFixed(1)}`,
+  )
+  assert.ok(sc.player.pos.x >= x0 - 0.5, '不应被拉向反方向')
+})
+
+test('批 3：**连轻陶罐 → 收丝 → 它被拉了过来**（与梁柱形成对照）', () => {
+  const sc = new PrologueScene()
+  toEncounter(sc)
+  killMote(sc)
+  for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
+
+  const px0 = sc.player.pos.x
+  const qx0 = sc.pot.pos.x
+  const gap0 = Math.abs(qx0 - px0)
+
+  sc.step(input({ aimPoint: { x: sc.pot.pos.x, y: sc.pot.pos.y }, attachPressed: true }))
+  assert.equal(sc.world.ropes[0]!.targetId, sc.pot.id, '应该连上的是轻陶罐')
+
+  for (let i = 0; i < 90; i++) sc.step(input({ reel: 'in' }))
+
+  const gap1 = Math.abs(sc.pot.pos.x - sc.player.pos.x)
+  assert.ok(gap1 < gap0 - 1, `陶罐应被拉过来：间距 ${gap0.toFixed(1)} → ${gap1.toFixed(1)}`)
+  assert.ok(
+    Math.abs(sc.player.pos.x - px0) < 0.5,
+    `着地的主角基本不该动，实际位移 ${(sc.player.pos.x - px0).toFixed(2)}`,
+  )
+})
+
+test('批 3：两分钟没打死墨卒也会推进（不卡死），且不影响 AC-01 判定', () => {
+  const sc = new PrologueScene()
+  toEncounter(sc)
+  // 什么都不做，等过设计给的两分钟上限
+  for (let i = 0; i < 60 * (C.ENCOUNTER_MAX_SEC + 3); i++) sc.step(NO_INPUT)
+
+  assert.equal(sc.currentStage, 'massdiff', '到点必须推进，否则失败者永远看不到后面的内容')
+  assert.equal(sc.telemetry.ac01Seconds(), null, '没击杀就是没击杀')
+  assert.equal(sc.telemetry.ac01Passed(60), false)
 })

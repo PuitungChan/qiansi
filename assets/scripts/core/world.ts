@@ -37,7 +37,7 @@ import {
   refreshDerived,
   setMass,
 } from './body'
-import { type Contact, boundsOverlap, collide } from './collide'
+import { type Contact, boundsOverlap, closestPointOnShape, collide, distanceToShape } from './collide'
 import * as C from './constants'
 import { type DamageResult, resolveImpactAgainst } from './damage'
 import type { SimEvent } from './events'
@@ -275,6 +275,28 @@ export class World {
     return b.pos
   }
 
+  /**
+   * 丝线在**目标身上**的锚点：离主角最近的那一点。
+   *
+   * 为什么不是目标中心：大型物体上这个区别是致命的。序章的横梁有 16 米宽，
+   * 若锚点取中心，玩家站在梁左端下方连上去时绳长会瞬间变成 16.8m（上限 12m），
+   * 一连接就被猛拽。取最近表面点之后，绳长才等于玩家眼里的距离。
+   */
+  private targetAnchorOf(target: Body, from: Vec2): Vec2 {
+    const s = target.shape
+    const half = s.kind === 'circle' ? s.radius : Math.max(s.hw, s.hh)
+    // **大物体取表面最近点，小物体取中心。**
+    //
+    // 判据是"半尺寸是否超过附着容差"：超过之后，"瞄准物体的边缘"与"瞄准它的中心"
+    // 相差得比容差还远，玩家会觉得连不上；而且绳长会按中心虚高（16m 宽的横梁会虚高到 16.8m，
+    // 超过 ROPE_LEN_MAX=12 一连接就被猛拽）。
+    //
+    // 小物体（石块 0.5 / 陶罐 0.3 / 墨卒 0.4）仍取中心：那是标准模型，
+    // 也让手感与 M0 已通过的标定保持一致——把石块的锚点挪到表面上会让有效绳长少 0.5m，
+    // 实测甩速从 17 掉到 12.9，把已经验收过的手感改坏了。
+    return half > this.config.attachTolerance ? closestPointOnShape(from, target) : target.pos
+  }
+
   private applyRopeCommands(input: InputFrame, p: Body): void {
     // 断（先断后牵：允许同帧"断一根、牵一根"）
     if (input.cutRope >= 0) {
@@ -319,10 +341,11 @@ export class World {
     let best: Body | null = null
     let bestD = Number.POSITIVE_INFINITY
     for (const b of this.bodies) {
-      if (!b.anchorable || b.tag === 'player' || !b.alive) continue
-      const d = dist(b.pos, aim)
+      if (!b.anchorable || b.tag === 'player' || !b.alive || b.removed) continue
+      // 用**到表面的距离**而不是到中心的距离：16 米宽的横梁不该要求玩家瞄准它的正中心
+      const d = distanceToShape(aim, b)
       if (d > this.config.attachTolerance) continue
-      if (dist(from, b.pos) > C.ROPE_LEN_MAX) continue
+      if (distanceToShape(from, b) > C.ROPE_LEN_MAX) continue
       if (d < bestD) {
         bestD = d
         best = b
@@ -336,12 +359,13 @@ export class World {
     r.targetId = target.id
     // D-020：连接瞬间丝长 = 当前距离，不产生拉力；只有主动收丝才发力。
     const a = this.anchorOf(player)
-    r.targetLength = clampRopeLength(dist(a, target.pos))
+    const b = this.targetAnchorOf(target, a)
+    r.targetLength = clampRopeLength(dist(a, b))
     r.length = r.targetLength
     r.tension = 0
     r.peakTension = 0
     r.lastBreakReason = 'none'
-    const chain = createVerletChain(a, target.pos, C.ROPE_SEGMENTS)
+    const chain = createVerletChain(a, b, C.ROPE_SEGMENTS)
     this.chains[r.index] = chain
     this.events.push({ kind: 'rope-attached', rope: r.index, target: target.id })
   }
@@ -395,7 +419,8 @@ export class World {
         continue
       }
 
-      const d = sub(target.pos, playerAnchor)
+      const anchorB = this.targetAnchorOf(target, playerAnchor)
+      const d = sub(anchorB, playerAnchor)
       const L = len(d)
       r.length = L
       const nx = L > 1e-9 ? d.x / L : 0
@@ -449,7 +474,8 @@ export class World {
       if (target === null) continue
 
       const a = this.anchorOf(p)
-      const d = sub(target.pos, a)
+      const anchorB = this.targetAnchorOf(target, a)
+      const d = sub(anchorB, a)
       const L = len(d)
       if (L < 1e-9) continue
 
@@ -769,9 +795,10 @@ export class World {
         this.chains[r.index] = null
         continue
       }
+      const anchorA = this.anchorOf(p)
       stepVerletChain(chain, {
-        a: this.anchorOf(p),
-        b: target.pos,
+        a: anchorA,
+        b: this.targetAnchorOf(target, anchorA),
         restLength: Math.max(r.targetLength, 0.05),
         gravityY: this.config.gravityY,
         dt: C.DT,
@@ -790,7 +817,7 @@ export class World {
       if (r.state !== 'attached') continue
       const t = this.bodyById(r.targetId)
       if (t === null) continue
-      const d = distanceToSegment(point, a, t.pos)
+      const d = distanceToSegment(point, a, this.targetAnchorOf(t, a))
       if (d <= bestD) {
         bestD = d
         best = r.index
@@ -808,7 +835,7 @@ export class World {
       if (r.state !== 'attached') continue
       const t = this.bodyById(r.targetId)
       if (t === null) continue
-      const d = distanceToSegment(point, a, t.pos)
+      const d = distanceToSegment(point, a, this.targetAnchorOf(t, a))
       if (d < bestD) {
         bestD = d
         best = r.index

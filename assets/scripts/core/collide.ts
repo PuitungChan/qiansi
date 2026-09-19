@@ -157,6 +157,38 @@ export function boundsOverlap(a: Body, b: Body): boolean {
   )
 }
 
+/**
+ * 刚体表面上离 `p` 最近的点（`p` 在形状内部时返回 `p` 本身）。
+ *
+ * 为什么必须按**形状**而不是按中心算：大型物体上这个区别是致命的。
+ * 序章的横梁有 **16 米宽**，若丝线的锚点取它的中心，玩家站在梁的左端下方
+ * 连上去时绳子长度会瞬间变成 16.8m —— 远超 `ROPE_LEN_MAX`（12m），
+ * 一连接就被猛拽。锚点落在"最近的表面点"之后，绳子长度才等于玩家眼里的距离。
+ */
+export function closestPointOnShape(p: Vec2, b: Body): Vec2 {
+  const s = b.shape
+  if (s.kind === 'circle') {
+    const dx = p.x - b.pos.x
+    const dy = p.y - b.pos.y
+    const l = Math.sqrt(dx * dx + dy * dy)
+    if (l <= s.radius || l < 1e-9) return { x: p.x, y: p.y }
+    const k = s.radius / l
+    return { x: b.pos.x + dx * k, y: b.pos.y + dy * k }
+  }
+  return {
+    x: Math.min(Math.max(p.x, b.pos.x - s.hw), b.pos.x + s.hw),
+    y: Math.min(Math.max(p.y, b.pos.y - s.hh), b.pos.y + s.hh),
+  }
+}
+
+/** `p` 到刚体表面的距离（在内部时为 0）。 */
+export function distanceToShape(p: Vec2, b: Body): number {
+  const c = closestPointOnShape(p, b)
+  const dx = p.x - c.x
+  const dy = p.y - c.y
+  return Math.sqrt(dx * dx + dy * dy)
+}
+
 /** 调试用：把法线格式化。 */
 export function formatNormal(n: Vec2): string {
   const u = norm(n)

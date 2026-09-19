@@ -43,6 +43,8 @@ export type TelemetryKind =
   | 'kill'
   /** 触发了 60 秒克制提示（石头开始发光） */
   | 'hint_glow'
+  /** 进入新的序章段落（`name` 是段落名） */
+  | 'stage'
   /** 试玩结束 */
   | 'run_end'
 
@@ -165,6 +167,19 @@ export class Telemetry {
   markGlow(tick: number): void {
     if (this.events.some((e) => e.kind === 'hint_glow')) return
     this.push(tick, 'hint_glow', { afterSec: this.encounterStarted ? this.sinceEncounter(tick) : -1 })
+  }
+
+  /** 进入新的序章段落。分析时用它把时间线切成"他花了多久过第一段"。 */
+  markStage(tick: number, name: string): void {
+    this.push(tick, 'stage', { name, afterEncounterSec: this.sinceEncounter(tick) })
+  }
+
+  /** 某段落开始的秒数（相对试玩开始）；没进过返回 null。 */
+  stageStartSec(name: string): number | null {
+    for (const e of this.events) {
+      if (e.kind === 'stage' && e.name === name) return e.t
+    }
+    return null
   }
 
   end(tick: number): void {
