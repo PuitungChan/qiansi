@@ -19,6 +19,7 @@
  */
 
 import {
+  Canvas,
   Color,
   Component,
   Graphics,
@@ -87,10 +88,33 @@ export class QiansiBootstrap extends Component {
     // 与脚本同生共死，不会因为有人改了工程设置而悄悄失效（FR-RND-003 / NFR-DISP-001）。
     view.setDesignResolutionSize(VIEW_W, VIEW_H, ResolutionPolicy.FIXED_HEIGHT)
 
+    this.assertUnderCanvas()
     this.buildNodes()
     this.playerInput = new PlayerInput()
     this.scenario = new M0Scenario({ ropeCount: this.ropeCount })
     this.demoTicks = demoScript().length
+  }
+
+  /**
+   * 防呆：本组件必须挂在 **Canvas**（或它的子孙节点）上。
+   *
+   * 为什么必须检查：全部渲染坐标都是"以画布中心为原点"（`Coordinates.ts`）。
+   * 如果脚本挂在 Scene 根节点或一个普通节点上，画面会整体偏出屏幕，
+   * 而现象是"全黑"——这与"脚本没编译好"极难区分，会浪费很多排查时间。
+   * 明确报一行错，比让你对着黑屏猜要好。
+   */
+  private assertUnderCanvas(): void {
+    let n: Node | null = this.node
+    while (n !== null) {
+      if (n.getComponent(Canvas) !== null) return
+      n = n.parent
+    }
+    console.error(
+      '[牵丝] QiansiBootstrap 必须挂在 Canvas 节点（或其子节点）上，当前节点不在 Canvas 之下。\n' +
+        '修复：在层级管理器右键 → 创建 → UI 组件 → Canvas（会自动带一个 Camera 子节点），' +
+        '然后把本脚本拖到该 Canvas 上。\n' +
+        '注意：资源管理器里「新建 → Scene」建出来的是**空场景**，默认不含 Canvas。',
+    )
   }
 
   onDestroy(): void {
@@ -269,10 +293,19 @@ export class QiansiBootstrap extends Component {
     }
   }
 
-  /** 调试面板底衬（画在同一张 Graphics 上，节点局部坐标以房间中心为原点）。 */
+  /**
+   * 调试面板底衬（画在同一张 Graphics 上，节点局部坐标以**画布中心**为原点）。
+   *
+   * 注意坐标系：屏幕是 x ∈ [−960, 960]、y ∈ [−540, 540]，
+   * **左上角是 (−960, +540)** 而不是 (−960, −540)——后者是左下角。
+   * `Graphics.rect(x, y, w, h)` 的 (x, y) 是矩形的**左下角**，所以这里的 y 要用
+   * `540 − 高度`。第一版把面板画到了左下角、和右上角的文字错位，就是这个原因。
+   */
   private drawPanelBackground(g: Graphics): void {
+    const w = 960
+    const h = 560
     g.fillColor = new Color(0, 0, 0, 170)
-    g.rect(-960, -540, 640, 560)
+    g.rect(-960, 540 - h, w, h)
     g.fill()
   }
 }
