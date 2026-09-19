@@ -37,13 +37,15 @@ export type SimEvent =
   | {
       readonly kind: 'damage'
       readonly target: number
+      /** **攻击者刚体 id**。AC-01 必须知道"是不是石块砸死的"，所以这里必须带来源。 */
+      readonly by: number
       readonly amount: number
       readonly type: DamageType
       readonly hpAfter: number
       readonly at: Vec2
     }
-  /** 目标死亡。M0 不实现死亡流程，仅供调试面板与埋点。 */
-  | { readonly kind: 'killed'; readonly target: number; readonly at: Vec2 }
+  /** 目标死亡。M0/M1 不实现死亡流程，仅供调试面板与埋点。 */
+  | { readonly kind: 'killed'; readonly target: number; readonly by: number; readonly at: Vec2 }
 
 /** 事件类型过滤助手，渲染层用。 */
 export function eventsOf<K extends SimEvent['kind']>(

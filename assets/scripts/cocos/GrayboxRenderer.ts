@@ -62,6 +62,8 @@ export interface RenderOptions {
   aimPoint: { x: number; y: number } | null
   /** 预判线采样点（世界坐标），由 Bootstrap 用 core/aim 算好后传入。 */
   prediction: { x: number; y: number }[]
+  /** 需要"发光提示"的刚体 id（-1 = 无）。见 PlayableScene.glowBodyId()。 */
+  glowBodyId: number
 }
 
 export class GrayboxRenderer {
@@ -72,10 +74,36 @@ export class GrayboxRenderer {
     this.drawBackground(g)
     this.drawTerrain(g, sc)
     this.drawBodies(g, sc)
+    if (opts.glowBodyId >= 0) this.drawGlow(g, sc, opts.glowBodyId)
     this.drawRopes(g, sc)
     if (opts.aimPoint !== null) this.drawAim(g, sc, opts.aimPoint)
     if (opts.showPrediction) this.drawPrediction(g, sc, opts.prediction)
     this.drawHud(g, sc)
+  }
+
+  /**
+   * **克制提示**：给一个刚体套一层缓慢脉动的金环（设计 §7「石头会微微发光」）。
+   *
+   * 它存在的意义是"**不弹文字**"——所以必须做得足够轻，轻到玩家以为是自己注意到的。
+   * 因此：只有描边没有填充、透明度低、脉动周期长（≈2 秒一次）。
+   * 相位由 `tick` 推出来，**不用 wall-clock**，否则回放与录屏对不上。
+   */
+  private drawGlow(g: Graphics, sc: PlayableScene, id: number): void {
+    const b = sc.world.bodyById(id)
+    if (b === null || b.removed) return
+    const pulse = 0.5 + 0.5 * Math.sin(sc.world.tick * 0.055)
+    const base = b.shape.kind === 'circle' ? b.shape.radius : b.shape.hw
+    const c = worldToLocal(b.pos)
+
+    g.lineWidth = 1.5 + 2 * pulse
+    g.strokeColor = new Color(232, 196, 106, Math.round(50 + 90 * pulse))
+    g.circle(c.x, c.y, metersToPx(base + 0.22 + 0.12 * pulse))
+    g.stroke()
+
+    g.lineWidth = 1
+    g.strokeColor = new Color(232, 196, 106, Math.round(20 + 45 * pulse))
+    g.circle(c.x, c.y, metersToPx(base + 0.55 + 0.25 * pulse))
+    g.stroke()
   }
 
   /**

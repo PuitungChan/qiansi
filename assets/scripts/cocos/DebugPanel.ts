@@ -44,6 +44,7 @@ const HELP = [
   'R 复位   P 预判线   G 面板   T 慢动作 0.25x',
   'N 丝线数量 1->4（仅 M0）  F1 播放 / F2 停止演示（仅 M0）',
   'M 切换场景：序章（M1） <-> M0 沙盒',
+  'J 导出 AC-01 埋点（JSONL）   H 打印最近输入序列',
 ]
 
 export class DebugPanel {

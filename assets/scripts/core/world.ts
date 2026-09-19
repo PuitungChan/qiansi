@@ -628,6 +628,7 @@ export class World {
     this.events.push({
       kind: 'damage',
       target: target.id,
+      by: attacker.id,
       amount: res.amount,
       type: res.type,
       hpAfter: target.hp,
@@ -638,7 +639,7 @@ export class World {
       target.alive = false
       // 易碎场景物（陶罐等）当场碎裂消失；敌人留在场上（M1 只标记不播死亡流程）
       if (target.shattersOnDeath) target.removed = true
-      this.events.push({ kind: 'killed', target: target.id, at })
+      this.events.push({ kind: 'killed', target: target.id, by: attacker.id, at })
     }
   }
 

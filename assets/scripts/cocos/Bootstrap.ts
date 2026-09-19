@@ -45,6 +45,7 @@ import { predictTrajectory } from '../core/aim'
 import type { PlayableScene } from '../core/playable'
 import { M0Scenario } from '../core/scene_m0'
 import { PrologueScene } from '../core/scene_prologue'
+import type { Telemetry } from '../core/telemetry'
 import { DebugPanel, type DebugPanelState } from './DebugPanel'
 import { GrayboxRenderer, type RenderOptions } from './GrayboxRenderer'
 import { PlayerInput } from './PlayerInput'
@@ -310,6 +311,7 @@ export class QiansiBootstrap extends Component {
       this.demoIndex = 0
     }
     if (pressed(KeyCode.F2)) this.demoMode = false
+    if (pressed(KeyCode.KEY_J)) this.exportTelemetry()
     if (pressed(KeyCode.KEY_H)) {
       // 把最近的输入序列打到控制台 —— 我可以在本地用它精确复现你看到的那一刻（NFR-MNT-003）
       console.log(
@@ -317,6 +319,44 @@ export class QiansiBootstrap extends Component {
           `tick=${this.scene.world.tick}\n` +
           this.replay.join('\n'),
       )
+    }
+  }
+
+  /**
+   * `J` 键：导出 AC-01 埋点（D-042 / FR-LIV-003）。
+   *
+   * 浏览器里直接下载一个 `.jsonl` 文件；其他平台打印到控制台，复制即可。
+   * **两条路都给**，因为"测试者在你旁边点了 J 却不知道文件在哪"会让整场测试白做。
+   *
+   * 刻意**不依赖 DOM 类型**（用结构化断言而不是 `Document`/`Blob` 类型）——
+   * 这个文件要在 web 与 native 两种构建下都编译得过。
+   */
+  private exportTelemetry(): void {
+    const holder = this.scene as unknown as { telemetry?: Telemetry }
+    const t = holder.telemetry
+    if (t === undefined) {
+      console.log('[牵丝] 当前场景没有埋点（只有序章有）')
+      return
+    }
+    const jsonl = t.toJSONL()
+    console.log(`[牵丝] AC-01 埋点导出\n${t.summaryLine()}\n--- JSONL ---\n${jsonl}`)
+
+    const g = globalThis as unknown as {
+      document?: { createElement(tag: string): { href: string; download: string; click(): void } }
+      Blob?: new (parts: string[], opts: { type: string }) => unknown
+      URL?: { createObjectURL(b: unknown): string; revokeObjectURL(u: string): void }
+    }
+    if (g.document === undefined || g.Blob === undefined || g.URL === undefined) return
+    try {
+      const blob = new g.Blob([jsonl], { type: 'application/x-ndjson' })
+      const url = g.URL.createObjectURL(blob)
+      const a = g.document.createElement('a')
+      a.href = url
+      a.download = 'qiansi-ac01.jsonl'
+      a.click()
+      g.URL.revokeObjectURL(url)
+    } catch {
+      // 没有 DOM 就算了 —— 控制台里已经有全文
     }
   }
 
@@ -342,6 +382,7 @@ export class QiansiBootstrap extends Component {
       showDebug: this.showDebug,
       aimPoint: this.playerInput.isAiming ? this.playerInput.aimWorld : null,
       prediction: this.prediction,
+      glowBodyId: this.scene.glowBodyId(),
     }
     this.renderer.draw(this.gfx, this.scene, opts)
 

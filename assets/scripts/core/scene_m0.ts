@@ -221,6 +221,11 @@ export class M0Scenario {
     return null
   }
 
+  /** M0 没有克制提示。 */
+  glowBodyId(): number {
+    return -1
+  }
+
   /** 场景摘要，调试面板与埋点用。 */
   summary(): Record<string, number | string> {
     const w = this.world
