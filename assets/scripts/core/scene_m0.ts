@@ -216,6 +216,11 @@ export class M0Scenario {
     this.world.settle(12)
   }
 
+  /** M0 是调试沙盒，**没有任何提示**（它不是教学关卡）。 */
+  hint(): string | null {
+    return null
+  }
+
   /** 场景摘要，调试面板与埋点用。 */
   summary(): Record<string, number | string> {
     const w = this.world

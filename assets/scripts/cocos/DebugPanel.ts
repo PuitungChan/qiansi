@@ -1,99 +1,69 @@
 /**
- * 《牵丝》—— M0 调试面板（NFR-MNT-002）。
+ * 《牵丝》—— M0/M1 调试面板（NFR-MNT-002）。
  *
  * AC-17 要求调试面板显示 **质量 / 速度 / 动量 / 张力**。这里把它做成一个**纯格式化函数**：
- * 输入场景状态，输出一屏文本。这样面板本身也能被单元测试覆盖，而不需要跑起编辑器。
+ * 输入场景摘要，输出一屏文本。这样面板本身也能被单元测试覆盖，而不需要跑起编辑器。
  *
- * 面板内容刻意包含 `hash` 一栏：M0 阶段唯一的"客观手感证据"就是**回放哈希**。
- * 你试玩时如果觉得"这次甩得不对"，把 hash 报出来，我就能在本地精确复现那一刻。
+ * ## 为什么改成读 `summary()` 而不是直接读 M0Scenario 的字段
+ *
+ * 面板原先直接访问 `scenario.stone` / `scenario.armor`，于是**一加新场景（序章）就编译不过**。
+ * 现在它只依赖 `PlayableScene.summary()` 这个窄接口 —— 场景自己决定要暴露什么，
+ * 面板只负责排版。加场景不用再动这一层。
+ *
+ * 面板内容刻意包含 `hash`：它是"客观手感证据"。试玩时觉得"这一下甩得不对"，
+ * 把 hash 报出来就能在本地精确复现那一刻。
  */
 
 import type { InputFrame } from '../core/input'
-import type { M0Scenario } from '../core/scene_m0'
-import { MAX_ROPES } from '../core/constants'
+import type { PlayableScene } from '../core/playable'
 
 export interface DebugPanelState {
   fps: number
-  /** 当前是否在播放演示脚本。 */
+  /** 当前场景名（用于区分 M0 沙盒与序章）。 */
+  sceneName: string
+  /** 是否在播放演示脚本（仅 M0 沙盒）。 */
   demoMode: boolean
-  /** 演示播放进度（第几帧 / 总帧数）。 */
   demoIndex: number
   demoTicks: number
-  /** 预判线开关。 */
   showPrediction: boolean
-  /** 慢动作倍数。 */
   slowMoScale: number
   /** 本 tick 实际喂给内核的输入。 */
   frame: InputFrame
-  /** 累计超限断弦次数。 */
   ropeBreaks: number
 }
 
 const HELP = [
   '── 操作（设计 §3.2 键鼠） ──',
-  'A / D        移动',
-  '按住左键拖向目标后松手   牵（拖向空处取消）',
-  '滚轮上 / 空格           收丝',
-  '滚轮下 / Shift          放丝',
-  '点击丝线 / Q            断丝',
+  'A / D                  移动',
+  '按住左键拖向目标后松手    牵（拖向空处取消）',
+  '按住左键不动            收丝（设计 §7「按住不放」）',
+  '滚轮上 / 空格 收丝      滚轮下 / Shift  放丝',
+  '右键 / Q / 轻点丝线      断丝',
   '',
   '── 调试热键 ──',
-  'R   复位场景        P  预判线开关',
-  'G   面板开关        T  慢动作 0.25×',
-  'N   丝线数量 1→4    F1 播放演示 / F2 停止',
+  'R 复位   P 预判线   G 面板   T 慢动作 0.25x',
+  'N 丝线数量 1->4（仅 M0）  F1 播放 / F2 停止演示（仅 M0）',
+  'M 切换场景：序章（M1） <-> M0 沙盒',
 ]
 
 export class DebugPanel {
-  format(sc: M0Scenario, st: DebugPanelState): string {
-    const w = sc.world
-    const r0 = w.ropes[0]
-    const ratio = r0 !== undefined && w.config.tensionMax > 0 ? r0.tension / w.config.tensionMax : 0
-
+  format(scene: PlayableScene, st: DebugPanelState): string {
+    const s = scene.summary()
     const lines: string[] = []
-    lines.push(`《牵丝》M0 灰盒  fps=${st.fps.toFixed(0)}  tick=${w.tick}${st.slowMoScale < 1 ? '  [慢动作]' : ''}`)
-    lines.push(`hash ${w.stateHash()}`)
+
+    lines.push(
+      `《牵丝》${st.sceneName}  fps=${st.fps.toFixed(0)}${st.slowMoScale < 1 ? '  [慢动作]' : ''}`,
+    )
+    lines.push(`hash ${scene.world.stateHash()}`)
     lines.push('')
-    lines.push('─ 主角 ─')
-    lines.push(
-      `质量 ${sc.player.mass.toFixed(sc.player.grounded ? 0 : 2)}` +
-        `   ${sc.player.grounded ? '着地 → 等效 ∞（锚点）' : '离地 → 0.5（被甩方）'}`,
-    )
-    lines.push(
-      `位置 (${sc.player.pos.x.toFixed(2)}, ${sc.player.pos.y.toFixed(2)})` +
-        `  速度 (${sc.player.vel.x.toFixed(2)}, ${sc.player.vel.y.toFixed(2)})`,
-    )
-    lines.push(
-      `动量 ${mag(sc.player.momentum).toFixed(2)}  动能 ${sc.player.kineticEnergy.toFixed(2)}`,
-    )
-    lines.push('')
-    lines.push('─ 石块 ─')
-    lines.push(
-      `位置 (${sc.stone.pos.x.toFixed(2)}, ${sc.stone.pos.y.toFixed(2)})` +
-        `  速度 ${Math.hypot(sc.stone.vel.x, sc.stone.vel.y).toFixed(2)} m/s`,
-    )
-    lines.push(
-      `动量 ${mag(sc.stone.momentum).toFixed(2)}  动能 ${sc.stone.kineticEnergy.toFixed(2)}`,
-    )
-    lines.push('')
-    lines.push('─ 丝线 ─')
-    lines.push(
-      `状态 ${r0?.state ?? '-'}  长度 ${(r0?.length ?? 0).toFixed(2)}m` +
-        `  目标 ${(r0?.targetLength ?? 0).toFixed(2)}m`,
-    )
-    lines.push(
-      `张力 ${(r0?.tension ?? 0).toFixed(1)} N  占额定 ${(ratio * 100).toFixed(0)}%` +
-        `  峰值 ${(r0?.peakTension ?? 0).toFixed(1)} N`,
-    )
-    lines.push(`重凝剩余 ${((r0?.recongealRemaining ?? 0) * 1000).toFixed(0)} ms  累计断弦 ${st.ropeBreaks}`)
-    lines.push('')
-    lines.push('─ 墨甲 ─')
-    lines.push(
-      `HP ${sc.armor.hp.toFixed(1)} / ${sc.armor.maxHp}` +
-        `   ${sc.armor.alive ? '存活' : '已击杀（M0 不实现死亡流程）'}`,
-    )
-    lines.push(
-      `位置 (${sc.armor.pos.x.toFixed(2)}, ${sc.armor.pos.y.toFixed(2)})  弱点 ${sc.armor.weakness}`,
-    )
+
+    // 场景摘要：键值逐行排，顺序由场景自己决定
+    for (const key of Object.keys(s)) {
+      const v = s[key]
+      const shown = typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : v
+      lines.push(`${key.padEnd(16)} ${shown}`)
+    }
+
     lines.push('')
     lines.push('─ 输入（本 tick 实际喂给内核的一帧）─')
     lines.push(
@@ -101,23 +71,11 @@ export class DebugPanel {
         `  attach ${st.frame.attachPressed ? 'Y' : '-'}  cut ${st.frame.cutRope}`,
     )
     lines.push(
-      `演示 ${st.demoMode ? `播放中 ${st.demoIndex}/${st.demoTicks}` : '关闭'}` +
-        `   预判线 ${st.showPrediction ? '开' : '关'}   丝位上限 ${MAX_ROPE_COUNT(cfg(sc))}`,
+      `累计断弦 ${st.ropeBreaks}   预判线 ${st.showPrediction ? '开' : '关'}` +
+        (st.demoMode ? `   演示 ${st.demoIndex}/${st.demoTicks}` : ''),
     )
     lines.push('')
     for (const l of HELP) lines.push(l)
     return lines.join('\n')
   }
-}
-
-function mag(v: { x: number; y: number }): number {
-  return Math.hypot(v.x, v.y)
-}
-
-function cfg(sc: M0Scenario): number {
-  return sc.world.ropes.length
-}
-
-function MAX_ROPE_COUNT(n: number): string {
-  return `${n}（上限 ${MAX_ROPES}）`
 }

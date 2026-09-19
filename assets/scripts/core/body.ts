@@ -115,6 +115,19 @@ export interface Body {
    */
   ignorePlayer: boolean
 
+  /**
+   * 死亡时**碎裂消失**（陶罐、木栅这类易碎场景物），而不是像敌人那样留在场上。
+   * 为 true 时，血量归零会把 `removed` 置为 true —— 从碰撞与渲染中一起移除。
+   */
+  shattersOnDeath: boolean
+
+  /**
+   * 已被移出世界（碎裂、消散）。`detectContacts` 与渲染层都会跳过它。
+   * 用布尔标记而不是从 `bodies` 数组里删元素 —— **数组下标就是刚体 id**，
+   * 一删就会让 id 错位，确定性直接崩掉。
+   */
+  removed: boolean
+
   /** ── 以下为每 tick 由 refreshDerived() 刷新的派生量（FR-PHY-014）── */
   /** 动量 p = m·v */
   momentum: Vec2
@@ -142,6 +155,8 @@ export interface BodyInit {
   anchorable?: boolean
   hp?: number
   weakness?: Weakness
+  /** 死亡时碎裂消失（陶罐等易碎场景物）。见 `shattersOnDeath`。 */
+  shattersOnDeath?: boolean
 }
 
 export function createBody(init: BodyInit): Body {
@@ -164,6 +179,8 @@ export function createBody(init: BodyInit): Body {
     grounded: false,
     anchorable: init.anchorable ?? false,
     ignorePlayer: false,
+    shattersOnDeath: init.shattersOnDeath ?? false,
+    removed: false,
     momentum: { x: 0, y: 0 },
     kineticEnergy: 0,
     hp,

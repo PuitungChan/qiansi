@@ -25,8 +25,9 @@ import { M0Scenario } from '../assets/scripts/core/scene_m0'
  * - `8cf4d9e30c0b2f0e` D-032 起：张力到顶改为刚性约束，不再断丝
  * - `17801d9bc8f55fee` D-036 起：位置层约束改为交替迭代（修"石块和墨甲卡在一起"）
  * - `7d282cd6465751f3` D-039 起：道具摩擦 0.4 → 0.1（补偿 M0 没有自转，投掷射程翻倍）
+ * - `87798a76fdf50d33` 批 1 起：`removed`（碎裂标记）进入状态哈希
  */
-const EXPECTED_HASH = '7d282cd6465751f3'
+const EXPECTED_HASH = '87798a76fdf50d33'
 
 test('演示脚本长度固定且不含任何随机性', () => {
   const a = demoScript()

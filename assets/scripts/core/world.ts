@@ -515,8 +515,10 @@ export class World {
 
     for (let i = 0; i < n; i++) {
       const a = this.bodies[i]
+      if (a.removed) continue
       for (let j = i + 1; j < n; j++) {
         const b = this.bodies[j]
+        if (b.removed) continue
 
         if (a.tag === 'player' || b.tag === 'player') {
           const other = a.tag === 'player' ? b : a
@@ -580,17 +582,23 @@ export class World {
   }
 
   private resolveDamage(a: Body, b: Body, speed: number, at: Vec2): void {
+    // 谁可以被伤害？——**任何 maxHp > 0 的活体**，不再限定 `tag === 'enemy'`。
+    // 这样陶罐这类"可破坏场景物"（D-044）走的是与敌人完全相同的伤害管线，
+    // 不需要为它单开一条规则。
+    const aHurtable = a.maxHp > 0 && a.alive && !a.removed
+    const bHurtable = b.maxHp > 0 && b.alive && !b.removed
     let target: Body | null = null
     let attacker: Body | null = null
-    if (a.tag === 'enemy' && b.tag !== 'enemy') {
+    if (aHurtable && bHurtable) return // 两个都可受伤：不结算互相伤害（M1 不涉及）
+    if (aHurtable) {
       target = a
       attacker = b
-    } else if (b.tag === 'enemy' && a.tag !== 'enemy') {
+    } else if (bHurtable) {
       target = b
       attacker = a
     }
     if (target === null || attacker === null) return
-    if (!target.alive || target.maxHp <= 0) return
+    if (attacker.kind === 'static') return
 
     // ── 门槛 ①：**还牵在手上的东西不造成伤害**（D-037）──────────────
     //
@@ -628,6 +636,8 @@ export class World {
     if (target.hp <= 0) {
       target.hp = 0
       target.alive = false
+      // 易碎场景物（陶罐等）当场碎裂消失；敌人留在场上（M1 只标记不播死亡流程）
+      if (target.shattersOnDeath) target.removed = true
       this.events.push({ kind: 'killed', target: target.id, at })
     }
   }
@@ -831,6 +841,7 @@ export class World {
         b.hp,
         b.alive ? 1 : 0,
         b.ignorePlayer ? 1 : 0,
+        b.removed ? 1 : 0,
       )
     }
     for (const r of this.ropes) {

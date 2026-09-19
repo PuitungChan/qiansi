@@ -1,5 +1,5 @@
 /**
- * 《牵丝》—— M0 入口组件。
+ * 《牵丝》—— 入口组件（M0 沙盒 / M1 序章 共用）。
  *
  * 把三块东西接起来：
  *   `core/`（纯逻辑，零引擎依赖） ←→ `cocos/`（渲染、输入、调试面板）
@@ -10,6 +10,12 @@
  * 否则同一段操作在 60Hz 与 30Hz 设备上会得到不同结果，AC-05 直接作废。
  * 所以这里用累加器把渲染帧切成整数个固定步；并且设了每帧上限，
  * 避免卡顿时"补帧"把一帧拖成一个死亡螺旋。
+ *
+ * ## 场景是可插拔的
+ *
+ * 本组件只依赖 `core/playable.ts` 的 `PlayableScene` 窄接口（world / player / step /
+ * reset / summary / hint）。**加一个新场景不需要改这一层** —— 而这一层是唯一认识 `cc` 的，
+ * 改它就意味着你要重开一次编辑器。`M` 键在序章与 M0 沙盒之间切换。
  *
  * ## 场景极简约定
  *
@@ -32,11 +38,13 @@ import {
   _decorator,
   view,
 } from 'cc'
-import { DEMO_TICKS, demoScript } from '../core/demo'
 import { DT, VIEW_H, VIEW_W } from '../core/constants'
-import { type InputFrame, EMPTY_INPUT, encodeInput } from '../core/input'
+import { DEMO_TICKS, demoScript } from '../core/demo'
+import { EMPTY_INPUT, type InputFrame, encodeInput } from '../core/input'
 import { predictTrajectory } from '../core/aim'
+import type { PlayableScene } from '../core/playable'
 import { M0Scenario } from '../core/scene_m0'
+import { PrologueScene } from '../core/scene_prologue'
 import { DebugPanel, type DebugPanelState } from './DebugPanel'
 import { GrayboxRenderer, type RenderOptions } from './GrayboxRenderer'
 import { PlayerInput } from './PlayerInput'
@@ -48,14 +56,18 @@ const MAX_STEPS_PER_FRAME = 5
 /** 回放记录环形缓冲的长度（帧）。 */
 const REPLAY_BUFFER = 600
 
+type SceneKind = 'prologue' | 'm0'
+
 @ccclass('QiansiBootstrap')
 export class QiansiBootstrap extends Component {
-  private scenario!: M0Scenario
+  private scene!: PlayableScene
+  private sceneKind: SceneKind = 'prologue'
   private renderer = new GrayboxRenderer()
   private panel = new DebugPanel()
   private playerInput!: PlayerInput
   private gfx!: Graphics
   private label!: Label
+  private hintLabel!: Label
 
   private acc = 0
   private lastFrame: InputFrame = EMPTY_INPUT
@@ -91,24 +103,25 @@ export class QiansiBootstrap extends Component {
 
     this.assertUnderCanvas()
 
-    // 先建渲染节点，再建场景：万一后面的东西抛错，你至少能看到房间。
     this.buildRenderNode()
 
     this.playerInput = new PlayerInput()
-    this.scenario = new M0Scenario({ ropeCount: this.ropeCount })
-    this.demoTicks = demoScript().length
+    this.buildScene()
 
-    // 调试面板是**非必需**的：它出问题不该导致"整个游戏看不见"。
+    // 调试面板与提示都是**非必需**的：它们出问题不该导致"整个游戏看不见"
     try {
       this.buildDebugLabel()
+      this.buildHintLabel()
     } catch (err) {
       this.showDebug = false
-      console.warn('[牵丝] 调试面板创建失败，已自动关闭（不影响游戏本体）：', err)
+      this.label = undefined as unknown as Label
+      this.hintLabel = undefined as unknown as Label
+      console.warn('[牵丝] 面板/提示节点创建失败，已自动关闭（不影响游戏本体）：', err)
     }
 
     // 这行日志是给你排查用的：**看到它 = 脚本编译并运行了**；看不到 = 脚本压根没跑起来。
     console.log(
-      `[牵丝] QiansiBootstrap 已启动：tick 固定 ${(1 / DT).toFixed(0)}Hz，` +
+      `[牵丝] QiansiBootstrap 已启动（场景=${this.sceneKind}）：固定 ${(1 / DT).toFixed(0)}Hz，` +
         `房间 ${VIEW_W / 60}×${VIEW_H / 60}m。若画面仍然空白，请把控制台报错发我。`,
     )
   }
@@ -119,7 +132,6 @@ export class QiansiBootstrap extends Component {
    * 为什么必须检查：全部渲染坐标都是"以画布中心为原点"（`Coordinates.ts`）。
    * 如果脚本挂在 Scene 根节点或一个普通节点上，画面会整体偏出屏幕，
    * 而现象是"全黑"——这与"脚本没编译好"极难区分，会浪费很多排查时间。
-   * 明确报一行错，比让你对着黑屏猜要好。
    */
   private assertUnderCanvas(): void {
     let n: Node | null = this.node
@@ -157,22 +169,61 @@ export class QiansiBootstrap extends Component {
   }
 
   private buildDebugLabel(): void {
-    const labelNode = new Node('DebugPanel')
-    labelNode.layer = Layers.Enum.UI_2D
-    labelNode.parent = this.node
-    const ui = labelNode.addComponent(UITransform)
+    const node = new Node('DebugPanel')
+    node.layer = Layers.Enum.UI_2D
+    node.parent = this.node
+    const ui = node.addComponent(UITransform)
     ui.setAnchorPoint(0, 1)
     ui.setContentSize(900, 560)
-    labelNode.setPosition(-950, 530, 0)
-    this.label = labelNode.addComponent(Label)
-    this.label.string = ''
-    this.label.useSystemFont = true
-    this.label.fontSize = 15
-    this.label.lineHeight = 18
-    this.label.horizontalAlign = Label.HorizontalAlign.LEFT
-    this.label.verticalAlign = Label.VerticalAlign.TOP
-    this.label.enableWrapText = false
-    this.label.color = new Color(225, 225, 225, 255)
+    node.setPosition(-950, 530, 0)
+    const label = node.addComponent(Label)
+    label.string = ''
+    label.useSystemFont = true
+    label.fontSize = 14
+    label.lineHeight = 17
+    label.horizontalAlign = Label.HorizontalAlign.LEFT
+    label.verticalAlign = Label.VerticalAlign.TOP
+    label.enableWrapText = false
+    label.color = new Color(225, 225, 225, 255)
+    this.label = label
+  }
+
+  /**
+   * 极简提示（设计 §7 唯一的教学手段）。
+   *
+   * 放在**屏幕中上方**、字号明显大于调试面板 —— 它必须一眼看到，但不能抢走玩法层的注意力。
+   * 设计 §8.4 规定全游戏文本 ≤ 500 字，序章这 3 句就是其中最重要的 15 个字。
+   */
+  private buildHintLabel(): void {
+    const node = new Node('Hint')
+    node.layer = Layers.Enum.UI_2D
+    node.parent = this.node
+    const ui = node.addComponent(UITransform)
+    ui.setAnchorPoint(0.5, 0.5)
+    ui.setContentSize(1200, 80)
+    node.setPosition(0, 330, 0)
+    const label = node.addComponent(Label)
+    label.string = ''
+    label.useSystemFont = true
+    label.fontSize = 40
+    label.lineHeight = 48
+    label.horizontalAlign = Label.HorizontalAlign.CENTER
+    label.verticalAlign = Label.VerticalAlign.CENTER
+    label.enableWrapText = false
+    label.color = new Color(240, 226, 190, 235)
+    this.hintLabel = label
+  }
+
+  /** 建/重建当前场景。 */
+  private buildScene(): void {
+    this.scene =
+      this.sceneKind === 'prologue'
+        ? new PrologueScene({ ropeCount: this.ropeCount })
+        : new M0Scenario({ ropeCount: this.ropeCount })
+    this.ropeBreaks = 0
+    this.demoMode = false
+    this.demoIndex = 0
+    this.replay = []
   }
 
   update(dt: number): void {
@@ -196,19 +247,19 @@ export class QiansiBootstrap extends Component {
   /** 推进恰好一个固定步。这是唯一写入模拟的地方。 */
   private tickOnce(): void {
     let frame: InputFrame
-    if (this.demoMode) {
+    if (this.demoMode && this.sceneKind === 'm0') {
       const script = demoScript()
       frame = script[Math.min(this.demoIndex, script.length - 1)] ?? EMPTY_INPUT
       this.demoIndex++
       if (this.demoIndex >= script.length) this.demoMode = false
     } else {
-      frame = this.playerInput.sample(this.scenario)
+      frame = this.playerInput.sample(this.scene)
     }
 
     this.lastFrame = frame
-    this.scenario.step(frame)
+    this.scene.step(frame)
 
-    for (const e of this.scenario.world.events) {
+    for (const e of this.scene.world.events) {
       if (e.kind === 'rope-broken') this.ropeBreaks++
     }
 
@@ -240,50 +291,39 @@ export class QiansiBootstrap extends Component {
       return false
     }
 
-    if (pressed(KeyCode.KEY_R)) {
-      this.scenario.reset()
-      this.ropeBreaks = 0
-      this.demoMode = false
-      this.demoIndex = 0
-      this.replay = []
-    }
+    if (pressed(KeyCode.KEY_R)) this.scene.reset()
     if (pressed(KeyCode.KEY_P)) this.showPrediction = !this.showPrediction
     if (pressed(KeyCode.KEY_G)) this.showDebug = !this.showDebug
     if (pressed(KeyCode.KEY_T)) this.slowMo = !this.slowMo
+    if (pressed(KeyCode.KEY_M)) {
+      this.sceneKind = this.sceneKind === 'prologue' ? 'm0' : 'prologue'
+      this.buildScene()
+      console.log(`[牵丝] 已切换到场景：${this.sceneKind}`)
+    }
     if (pressed(KeyCode.KEY_N)) {
       this.ropeCount = (this.ropeCount % 4) + 1
-      this.rebuild()
+      this.buildScene()
     }
-    if (pressed(KeyCode.F1)) {
-      this.rebuild()
+    if (pressed(KeyCode.F1) && this.sceneKind === 'm0') {
+      this.scene.reset()
       this.demoMode = true
       this.demoIndex = 0
     }
-    if (pressed(KeyCode.F2)) {
-      this.demoMode = false
-    }
+    if (pressed(KeyCode.F2)) this.demoMode = false
     if (pressed(KeyCode.KEY_H)) {
       // 把最近的输入序列打到控制台 —— 我可以在本地用它精确复现你看到的那一刻（NFR-MNT-003）
       console.log(
-        `[qiansi] hash=${this.scenario.world.stateHash()} tick=${this.scenario.world.tick}\n` +
+        `[qiansi] scene=${this.sceneKind} hash=${this.scene.world.stateHash()} ` +
+          `tick=${this.scene.world.tick}\n` +
           this.replay.join('\n'),
       )
     }
   }
 
-  /** 按当前丝位数重建场景（丝位数量是构造期参数）。 */
-  private rebuild(): void {
-    this.scenario = new M0Scenario({ ropeCount: this.ropeCount })
-    this.ropeBreaks = 0
-    this.demoMode = false
-    this.demoIndex = 0
-    this.replay = []
-  }
-
   // ── 渲染 ────────────────────────────────────────────
 
   private render(): void {
-    const w = this.scenario.world
+    const w = this.scene.world
 
     // 预判线：只在牵住物体时出现（FR-UI-003），且按"假设此刻断丝"的自由弹道算（D-024）
     this.prediction = []
@@ -303,12 +343,18 @@ export class QiansiBootstrap extends Component {
       aimPoint: this.playerInput.isAiming ? this.playerInput.aimWorld : null,
       prediction: this.prediction,
     }
-    this.renderer.draw(this.gfx, this.scenario, opts)
+    this.renderer.draw(this.gfx, this.scene, opts)
 
-    if (this.showDebug) {
+    // 极简提示（设计 §7）
+    if (this.hintLabel !== undefined) {
+      this.hintLabel.string = this.scene.hint() ?? ''
+    }
+
+    if (this.showDebug && this.label !== undefined) {
       this.drawPanelBackground(this.gfx)
       const state: DebugPanelState = {
         fps: this.fps,
+        sceneName: this.sceneKind === 'prologue' ? '序章·批1' : 'M0 沙盒',
         demoMode: this.demoMode,
         demoIndex: this.demoIndex,
         demoTicks: this.demoTicks,
@@ -317,9 +363,9 @@ export class QiansiBootstrap extends Component {
         frame: this.lastFrame,
         ropeBreaks: this.ropeBreaks,
       }
-      this.label.string = this.panel.format(this.scenario, state)
+      this.label.string = this.panel.format(this.scene, state)
       this.label.node.active = true
-    } else {
+    } else if (this.label !== undefined) {
       this.label.string = ''
       this.label.node.active = false
     }
@@ -331,7 +377,7 @@ export class QiansiBootstrap extends Component {
    * 注意坐标系：屏幕是 x ∈ [−960, 960]、y ∈ [−540, 540]，
    * **左上角是 (−960, +540)** 而不是 (−960, −540)——后者是左下角。
    * `Graphics.rect(x, y, w, h)` 的 (x, y) 是矩形的**左下角**，所以这里的 y 要用
-   * `540 − 高度`。第一版把面板画到了左下角、和右上角的文字错位，就是这个原因。
+   * `540 − 高度`。第一版把面板画到了左下角、和左上角的文字错位，就是这个原因。
    */
   private drawPanelBackground(g: Graphics): void {
     const w = 960

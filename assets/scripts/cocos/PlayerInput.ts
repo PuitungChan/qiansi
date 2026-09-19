@@ -27,7 +27,7 @@ import {
   input,
 } from 'cc'
 import { type InputFrame, type ReelCommand, input as makeFrame, sanitizeMoveX } from '../core/input'
-import type { M0Scenario } from '../core/scene_m0'
+import type { PlayableScene } from '../core/playable'
 import { VIEW_W, DT } from '../core/constants'
 import { uiToWorld } from './Coordinates'
 
@@ -323,7 +323,7 @@ export class PlayerInput {
    * 产出一帧输入。**每个物理 tick 调用一次**，所以在一次渲染帧里连续跑多个
    * 固定步时，只有第一步会携带一次性事件（牵/断），这正是我们要的确定性语义。
    */
-  sample(sc: M0Scenario): InputFrame {
+  sample(sc: PlayableScene): InputFrame {
     let moveX = this.moveXFromKeys()
     if (this.touch.down) {
       const dx = this.touch.x - this.touch.startX

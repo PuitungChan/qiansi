@@ -12,9 +12,9 @@
  */
 
 import { Color, Graphics } from 'cc'
-import type { Shape } from '../core/body'
+import type { Body, Shape } from '../core/body'
+import type { PlayableScene } from '../core/playable'
 import { chainPoints } from '../core/rope'
-import type { M0Scenario } from '../core/scene_m0'
 import { metersToPx, worldToLocal } from './Coordinates'
 
 const C = {
@@ -25,6 +25,8 @@ const C = {
   player: new Color(216, 216, 216, 255),
   playerAir: new Color(150, 170, 190, 255),
   stone: new Color(168, 168, 172, 255),
+  /** 易碎场景物（陶罐）：略暖的灰，和石块区分开 */
+  fragile: new Color(176, 160, 140, 255),
   armor: new Color(138, 138, 144, 255),
   armorHurt: new Color(180, 120, 120, 255),
   armorDead: new Color(70, 70, 74, 255),
@@ -64,7 +66,7 @@ export interface RenderOptions {
 
 export class GrayboxRenderer {
   /** 把整个房间画到 Graphics 上。每帧先 clear。 */
-  draw(g: Graphics, sc: M0Scenario, opts: RenderOptions): void {
+  draw(g: Graphics, sc: PlayableScene, opts: RenderOptions): void {
     g.clear()
 
     this.drawBackground(g)
@@ -92,7 +94,7 @@ export class GrayboxRenderer {
 
   // ── 地形 ────────────────────────────────────────────
 
-  private drawTerrain(g: Graphics, sc: M0Scenario): void {
+  private drawTerrain(g: Graphics, sc: PlayableScene): void {
     for (const b of sc.world.bodies) {
       if (b.kind !== 'static') continue
       const fill =
@@ -101,24 +103,21 @@ export class GrayboxRenderer {
     }
   }
 
-  private drawBodies(g: Graphics, sc: M0Scenario): void {
-    // 主角：着地/离地用不同色调，让"谁是主动方"一眼可读（设计 §2.2）
-    const p = sc.player
-    this.fillAabb(g, p.pos.x, p.pos.y, halfW(p.shape), halfH(p.shape), p.grounded ? C.player : C.playerAir)
-
-    // 石块
-    const s = sc.stone
-    this.fillCircle(g, s.pos.x, s.pos.y, radiusOf(s.shape), C.stone)
-
-    // 墨甲：血量用颜色深浅表达，不显示血条（FR-UI-005 / FR-CBT-008）
-    const a = sc.armor
-    const aFill = !a.alive ? C.armorDead : a.hp < a.maxHp ? C.armorHurt : C.armor
-    this.fillAabb(g, a.pos.x, a.pos.y, halfW(a.shape), halfH(a.shape), aFill)
+  private drawBodies(g: Graphics, sc: PlayableScene): void {
+    for (const b of sc.world.bodies) {
+      if (b.kind === 'static' || b.removed) continue
+      const fill = colorOf(b)
+      if (b.shape.kind === 'circle') {
+        this.fillCircle(g, b.pos.x, b.pos.y, b.shape.radius, fill)
+      } else {
+        this.fillAabb(g, b.pos.x, b.pos.y, b.shape.hw, b.shape.hh, fill)
+      }
+    }
   }
 
   // ── 丝线 ────────────────────────────────────────────
 
-  private drawRopes(g: Graphics, sc: M0Scenario): void {
+  private drawRopes(g: Graphics, sc: PlayableScene): void {
     const tick = sc.world.tick
     const maxT = sc.world.config.tensionMax
     for (const r of sc.world.ropes) {
@@ -158,7 +157,7 @@ export class GrayboxRenderer {
   }
 
   /** 拖拽瞄准时的直线（黑色半透明金线，不必等连接成功）。 */
-  private drawAim(g: Graphics, sc: M0Scenario, aim: { x: number; y: number }): void {
+  private drawAim(g: Graphics, sc: PlayableScene, aim: { x: number; y: number }): void {
     const from = worldToLocal({
       x: sc.player.pos.x,
       y: sc.player.pos.y + 0.4,
@@ -174,7 +173,7 @@ export class GrayboxRenderer {
   /** 预判线：金色点线（FR-UI-003）。已由 core/aim 按"假设此刻断丝"算好。 */
   private drawPrediction(
     g: Graphics,
-    sc: M0Scenario,
+    sc: PlayableScene,
     prediction: { x: number; y: number }[],
   ): void {
     if (prediction.length === 0) return
@@ -193,7 +192,7 @@ export class GrayboxRenderer {
    * 已用 = 填充金色，未用 = 空心金环，重凝中 = 暗色实心。
    * 右上另画一条张力条 —— 它是调试辅助，R1 的正式 UI 只有圆点 + 听感。
    */
-  private drawHud(g: Graphics, sc: M0Scenario): void {
+  private drawHud(g: Graphics, sc: PlayableScene): void {
     for (const d of sc.world.ropeDisplay()) {
       const cx = 30 + d.index * 34
       const cy = 1035
@@ -255,12 +254,29 @@ export class GrayboxRenderer {
 
 export { tensionStyle }
 
+/**
+ * 刚体 → 灰盒颜色。**按 tag 与状态推导，不按名字硬编码** ——
+ * 这样 M0 沙盒与序章场景能共用同一个渲染器（见 core/playable.ts）。
+ */
+function colorOf(b: Body): Color {
+  switch (b.tag) {
+    case 'player':
+      // 着地/离地用不同色调，让"谁是主动方"一眼可读（设计 §2.2）
+      return b.grounded ? C.player : C.playerAir
+    case 'prop':
+      // 易碎物（陶罐）用略暖的灰，和石块区分开
+      return b.shattersOnDeath ? C.fragile : C.stone
+    case 'enemy':
+      // 血量用颜色深浅表达，不显示血条（FR-UI-005 / FR-CBT-008）
+      return !b.alive ? C.armorDead : b.hp < b.maxHp ? C.armorHurt : C.armor
+    default:
+      return C.stone
+  }
+}
+
 function halfW(shape: Shape): number {
   return shape.kind === 'aabb' ? shape.hw : shape.radius
 }
 function halfH(shape: Shape): number {
   return shape.kind === 'aabb' ? shape.hh : shape.radius
-}
-function radiusOf(shape: Shape): number {
-  return shape.kind === 'circle' ? shape.radius : shape.hw
 }
