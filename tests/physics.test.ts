@@ -303,6 +303,35 @@ test('D-036 敌人不可被丝线附着（「墨丝」心法第四章才解锁�
   assert.equal(sc.world.ropes[0]!.state, 'idle', 'R1 阶段不该能牵住敌人')
 })
 
+test('D-039 投出的石块速度衰减不能太快（投掷射程回归护栏）', () => {
+  // M0 没有自转（D-025），石块不能滚、只能滑。若用默认摩擦（0.4），
+  // 等效 μ = √(0.4×0.8) = 0.566 ⇒ 减速度 11.3 m/s²，20 m/s 投出后：
+  //   3m→18.1  6m→16.2  9m→14.0  12m→11.3  15m→7.7（快掉到伤害门槛 6 以下）
+  // 创始人实机反馈「速度衰减太快，基本上要贴近敌人甩出去才能砸到」→ D-039 降到 0.1。
+  const { world } = flatScene({}, { playerX: -40 })
+  const stone = addProp(world, { x: 0, mass: 4 })
+  stone.pos = { x: 0, y: 0.51 }
+  stone.vel = { x: 20, y: 0 }
+
+  const marks = [6, 12]
+  const speedAt: Record<number, number> = {}
+  let next = 0
+  for (let i = 0; i < 240 && next < marks.length; i++) {
+    world.step(NO_INPUT)
+    while (next < marks.length && stone.pos.x >= marks[next]!) {
+      speedAt[marks[next]!] = Math.hypot(stone.vel.x, stone.vel.y)
+      next++
+    }
+  }
+
+  assert.ok(speedAt[6]! > 17, `6m 处应保留大部分速度，实际 ${speedAt[6]!.toFixed(1)} m/s`)
+  assert.ok(
+    speedAt[12]! > 15,
+    `12m 处应仍有足够伤害（>15 m/s），实际 ${speedAt[12]!.toFixed(1)} m/s —— ` +
+      `衰减太快会让玩家只能贴脸投掷`,
+  )
+})
+
 test('D-033 断丝时物体若在主角体内，不应把主角撞飞（实机反馈 #4）', () => {
   const sc = new M0Scenario()
   sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))

@@ -117,6 +117,8 @@ export class M0Scenario {
     w.setPlayer(player)
 
     // ── 石块：质量 4，万用弹丸（设计 §2.6），可附着 ──
+    // friction 用 PROP_FRICTION 而不是默认值：见 constants.ts 里的实测表 ——
+    // M0 没有自转，石块只能滑，默认摩擦会让它在 12m 处就损失 44% 的速度。
     const stone = w.addBody({
       name: 'stone',
       kind: 'dynamic',
@@ -124,7 +126,7 @@ export class M0Scenario {
       shape: circle(0.5),
       pos: { x: 8, y: 0.51 },
       mass: 4,
-      friction: 0.4,
+      friction: C.PROP_FRICTION,
       restitution: 0.1,
       anchorable: true, // FR-PHY-013
     })

@@ -83,7 +83,7 @@ export function addProp(
     pos: { x: opts.x, y: radius + 0.01 },
     vel: { x: opts.vx ?? 0, y: opts.vy ?? 0 },
     mass: opts.mass,
-    friction: 0.4,
+    friction: C.PROP_FRICTION,
     restitution: 0.1,
     anchorable: opts.anchorable ?? true,
   })
