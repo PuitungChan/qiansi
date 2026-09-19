@@ -188,6 +188,7 @@ export class M0Scenario {
       s.body.grounded = false
       s.body.hp = s.body.maxHp
       s.body.alive = true
+      s.body.ignorePlayer = false
     }
     this.world.tick = 0
     this.world.stunRemaining = 0

@@ -130,8 +130,10 @@ export class GrayboxRenderer {
       const style = tensionStyle(ratio, tick)
       const pts = chainPoints(chain)
 
-      // 线宽随张力变细变亮（设计 §8.1「越紧越细越亮」）
-      g.lineWidth = Math.max(1.5, 5 - 3.5 * Math.min(ratio / 0.95, 1))
+      // 线宽随张力变细变亮（设计 §8.1「越紧越细越亮」）。
+      // 宽度整体调粗（v0.2.0 是 1.5–5px）：实机反馈「丝线太细了」，
+      // 灰盒阶段的金线既是画面焦点、又是**唯一的 HUD**，必须一眼看得见。
+      g.lineWidth = Math.max(4, 11 - 6 * Math.min(ratio / 0.95, 1))
       g.strokeColor = style.color
 
       const first = worldToLocal(pts[0]!)
@@ -145,7 +147,12 @@ export class GrayboxRenderer {
       // 端点亮一下，帮助玩家看清"丝在哪"
       const end = worldToLocal(pts[pts.length - 1]!)
       g.fillColor = style.color
-      g.circle(end.x, end.y, 3)
+      g.circle(end.x, end.y, 5)
+      g.fill()
+
+      // 丝在主角手上的那头也点一下，让"丝从哪来"一目了然
+      const startPt = worldToLocal(pts[0]!)
+      g.circle(startPt.x, startPt.y, 5)
       g.fill()
     }
   }

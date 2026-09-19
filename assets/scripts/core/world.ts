@@ -7,17 +7,21 @@
  *  1. tick++，推进硬直/重凝计时器
  *  2. 主角移动控制（着地/离地两套；硬直期间不响应）
  *  3. 丝线指令：断 → 牵 → 收/放（先断后牵，保证同帧"断一根牵一根"的语义）
- *  4. 施力：重力 + 丝线弹簧-阻尼（张力在这里算出）
+ *  4. 施力：重力 + 丝线弹簧-阻尼（张力在这里算出，并夹上限）
  *  5. 积分速度  v += (F/m)·dt
  *  6. 积分位置  x += v·dt
- *  7. 碰撞检测（固定双重循环 i<j，接触对顺序恒定）
- *  8. 撞击事件 + 伤害结算（用求解前的接近速度）
- *  9. 顺序冲量求解（固定迭代次数）+ 位置修正
- * 10. 着地状态更新 → 决定下一 tick 的主角质量
- * 11. 断弦检查（张力超限 → 断裂 + 0.8s 硬直）
- * 12. 刷新派生量（动量/动能，FR-PHY-014）
- * 13. 推进 Verlet 绳索（纯表现）
+ *  7. 丝线刚性约束：张力到顶时把两端钉在"目标丝长 + 弹性余量"上（D-032）
+ *  8. 碰撞检测（固定双重循环 i<j，接触对顺序恒定）
+ *  9. 撞击事件 + 伤害结算（用求解前的接近速度）
+ * 10. 顺序冲量求解（固定迭代次数）+ 位置修正
+ * 11. 着地状态更新 → 决定下一 tick 的主角质量
+ * 12. 脱离豁免更新（与主角分开后恢复碰撞，D-033）
+ * 13. 刷新派生量（动量/动能，FR-PHY-014）
+ * 14. 推进 Verlet 绳索（纯表现）
  * ```
+ *
+ * ⚠️ **超限断弦已取消**（D-032）：张力到顶不再断丝，而是变成刚性约束。
+ * 详见 `solveRopeConstraints()` 与常量里的 ROPE_MAX_STRETCH。
  *
  * 没有随机数、没有哈希表遍历、没有依赖 wall-clock 的分支。
  * 同样的输入帧序列 ⇒ 同样的 `stateHash()`（FR-PHY-008 / AC-05）。
@@ -57,7 +61,12 @@ import { type Vec2, dist, len, sub } from './vec2'
 
 export interface WorldConfig {
   gravityY: number
-  /** 素丝 400 / 韧丝 700（FR-PHY-004）。 */
+  /**
+   * 张力**上限**（牛顿）。素丝 1200 / 韧丝 2100。
+   *
+   * ⚠️ 这不是"断裂阈值"（D-032）：到达上限时丝线**不断裂**，而是变成刚性约束。
+   * 显示刻度 0–400 与之无关，只用于 UI 百分比（见 `TENSION_DISPLAY_MAX_BASE`）。
+   */
   tensionMax: number
   /** 收丝速度上限 8（素丝）/ 14（疾丝）（FR-PHY-002）。 */
   reelSpeed: number
@@ -72,21 +81,11 @@ export interface WorldConfig {
   attachTolerance: number
   ropeHitRadius: number
   solverIterations: number
-  /**
-   * 主角与被自己牵住的物体之间是否参与碰撞。默认 **false**（不参与）。
-   *
-   * 为什么默认关：实测当主角与石块会碰撞时，石块一被收近就顶在主角自己的身体上
-   * （主角盒右边缘 4.40，石块半径 0.5 ⇒ 石块卡在 x≈4.90），**再也抬不起来**，
-   * 甩动速度上限只有 5.8 m/s；而设计 §7 要求"石头被拉向主角……悬在半空，开始摆动"。
-   * 关掉之后石块可以被收到手部附近并绕主角旋转，`v ∝ 1/r` 的角动量加速才成立。
-   * 这是**玩法取舍**，不是物理妥协，详见 DECISIONS D-027。
-   */
-  collideWithHeld: boolean
 }
 
 export const DEFAULT_CONFIG: WorldConfig = {
   gravityY: C.GRAVITY_Y,
-  tensionMax: C.TENSION_BREAK_FORCE_BASE,
+  tensionMax: C.TENSION_LIMIT_BASE,
   reelSpeed: C.ROPE_REEL_SPEED_BASE,
   moveSpeed: C.PLAYER_MOVE_SPEED,
   airControlSpeed: C.PLAYER_AIR_CONTROL_SPEED,
@@ -98,7 +97,6 @@ export const DEFAULT_CONFIG: WorldConfig = {
   attachTolerance: C.ROPE_ATTACH_TOLERANCE,
   ropeHitRadius: C.ROPE_HIT_RADIUS_M,
   solverIterations: C.SOLVER_ITERATIONS,
-  collideWithHeld: false,
 }
 
 function clampAbs(v: number, limit: number): number {
@@ -208,12 +206,15 @@ export class World {
     this.applyForces(p)
     this.integrateVelocities()
     this.integratePositions()
+    // 丝线的刚性约束：张力到顶时把两端钉在"目标丝长 + 弹性余量"上（D-032）。
+    // 放在位置积分之后、碰撞之前 —— 它和碰撞一样是**位置层**的约束。
+    this.solveRopeConstraints()
     this.detectContacts()
     this.emitContacts()
     this.solveVelocities()
     this.correctPositions()
     this.updateGrounded()
-    this.checkRopeBreaks()
+    this.updateIgnoreFlags()
     for (const b of this.bodies) refreshDerived(b)
     this.stepChains(p)
   }
@@ -286,21 +287,18 @@ export class World {
     }
 
     // 收 / 放（对所有已附着的丝生效，设计 §3.1「缩短所有丝线」）
+    //
+    // 注：v0.2.0 这里有个"收丝机堵转"保护（张力达 80% 就暂停收丝）。
+    // 自 D-032 起丝线改为**到顶变刚性、永不断裂**，伸长量被位置约束直接夹住，
+    // 失控的前提消失，因此堵转已删除——收丝现在是纯粹的直接控制。
     if (input.reel !== 'hold' && this.stunRemaining <= 0) {
       const step = this.config.reelSpeed * C.DT
-      // 收丝机在额定负载处堵转（见 REEL_STALL_RATIO 的推导）：
-      // 一旦丝上的张力已达额定值，就不再继续缩短目标长度——真实绞盘的行为。
-      // 于是"按住不放"最多把张力推到 80%，而超限断弦交给动力学负载（甩动离心力、
-      // 急停、被坠落物猛拽）去触发，这才是设计 §2.4 里"超限断弦"的本意。
-      const stallTension = C.REEL_STALL_RATIO * this.config.tensionMax
       for (const r of this.ropes) {
         if (r.state !== 'attached') continue
-        if (input.reel === 'in') {
-          if (r.tension >= stallTension) continue
-          r.targetLength = clampRopeLength(r.targetLength - step)
-        } else {
-          r.targetLength = clampRopeLength(r.targetLength + step)
-        }
+        r.targetLength =
+          input.reel === 'in'
+            ? clampRopeLength(r.targetLength - step)
+            : clampRopeLength(r.targetLength + step)
       }
     }
   }
@@ -352,6 +350,14 @@ export class World {
     r.length = 0
     r.lastBreakReason = reason
     this.chains[r.index] = null
+
+    // 脱离豁免：丝线被收短时物体常常**在主角身体内部**（实测最近 0.129m，
+    // 而主角半宽 0.4 / 半高 0.8）。此刻若立刻恢复碰撞，求解器会把它猛推出去、
+    // 主角被一起撞飞（第 3 轮实机反馈 #4）。改为"已经在你身体里的东西不再撞你"，
+    // 等两者分开后自动恢复碰撞。见 Body.ignorePlayer。
+    const target = this.bodyById(targetId)
+    if (target !== null) target.ignorePlayer = true
+
     if (reason === 'cut') {
       this.events.push({ kind: 'rope-cut', rope: r.index, target: targetId })
     }
@@ -392,7 +398,7 @@ export class World {
 
       const vAxial = (target.vel.x - p.vel.x) * nx + (target.vel.y - p.vel.y) * ny
       const mr = reducedMass(p.invMass, target.invMass)
-      const T = ropeTension({
+      let T = ropeTension({
         length: L,
         targetLength: r.targetLength,
         axialVelocity: vAxial,
@@ -400,6 +406,10 @@ export class World {
         stiffness: this.config.stiffness,
         dampingRatio: this.config.dampingRatio,
       })
+      // 张力上限是"拉力上限"，不是"断裂阈值"（D-032）。
+      // 到顶之后超出的部分由 solveRopeConstraints() 用刚性约束接管，
+      // 这里把力的部分夹住即可，避免它继续涨。
+      if (T > this.config.tensionMax) T = this.config.tensionMax
       r.tension = T
       if (T > r.peakTension) r.peakTension = T
       if (T <= 0) continue
@@ -409,6 +419,60 @@ export class World {
       this.fy[target.id] -= ny * T
       this.fx[p.id] += nx * T
       this.fy[p.id] += ny * T
+    }
+  }
+
+  /**
+   * 丝线的**刚性约束**（D-032 的核心）。
+   *
+   * 张力到达上限后丝线不再伸长，而是把两端钉在 `目标丝长 + 弹性余量` 的距离上；
+   * 修正量按**逆质量**分配，于是自然涌现出设计要的行为：
+   *
+   * - 主角着地（等效质量 ∞）⇒ 几乎全部修正给物体 ⇒ **物体被拉向主角**
+   * - 主角离地（0.5）、物体更重 ⇒ 大部分修正给主角 ⇒ **主角被拉过去**
+   * - 两端都动不了 ⇒ 谁也过不去，主角**无法继续往张力增大的方向移动**
+   *
+   * 同时取消沿丝线方向**相互远离**的速度分量，否则每帧都会被弹簧再拉开一次、来回抖。
+   */
+  private solveRopeConstraints(): void {
+    const p = this.player
+    const limit = this.config.tensionMax / this.config.stiffness // = ROPE_MAX_STRETCH
+
+    for (const r of this.ropes) {
+      if (r.state !== 'attached') continue
+      const target = this.bodyById(r.targetId)
+      if (target === null) continue
+
+      const a = this.anchorOf(p)
+      const d = sub(target.pos, a)
+      const L = len(d)
+      if (L < 1e-9) continue
+
+      const maxLen = r.targetLength + limit
+      if (L <= maxLen) continue
+
+      const invSum = p.invMass + target.invMass
+      if (invSum <= 0) continue
+      const nx = d.x / L
+      const ny = d.y / L
+      const excess = L - maxLen
+
+      // 位置修正（按逆质量分配）
+      const ka = (excess * p.invMass) / invSum
+      const kb = (excess * target.invMass) / invSum
+      p.pos = { x: p.pos.x + nx * ka, y: p.pos.y + ny * ka }
+      target.pos = { x: target.pos.x - nx * kb, y: target.pos.y - ny * kb }
+
+      // 速度修正：只取消"相互远离"的轴向速度
+      const vAxial = (target.vel.x - p.vel.x) * nx + (target.vel.y - p.vel.y) * ny
+      if (vAxial > 0) {
+        const j = vAxial / invSum
+        p.vel = { x: p.vel.x + nx * j * p.invMass, y: p.vel.y + ny * j * p.invMass }
+        target.vel = {
+          x: target.vel.x - nx * j * target.invMass,
+          y: target.vel.y - ny * j * target.invMass,
+        }
+      }
     }
   }
 
@@ -436,18 +500,27 @@ export class World {
     this.contacts.length = 0
     const n = this.bodies.length
 
-    // 被牵住的物体 id（仅在 collideWithHeld=false 时用于豁免与主角的碰撞）
-    const held = this.heldTargetIds()
+    // 被牵住的物体 id：主角与它之间**不做碰撞**。
+    // 原因见 D-027：不豁免的话，石块一被收近就顶在主角自己的盒体上抬不起来，
+    // 甩动速度上限只有 5.8 m/s，而设计 §7 要求"石头被拉向主角……悬在半空，开始摆动"。
+    const held = new Set<number>()
+    for (const r of this.ropes) {
+      if (r.state === 'attached' && r.targetId >= 0) held.add(r.targetId)
+    }
 
     for (let i = 0; i < n; i++) {
       const a = this.bodies[i]
       for (let j = i + 1; j < n; j++) {
         const b = this.bodies[j]
-        if (!this.config.collideWithHeld) {
-          if ((a.tag === 'player' && held.has(b.id)) || (b.tag === 'player' && held.has(a.id))) {
-            continue
-          }
+
+        if (a.tag === 'player' || b.tag === 'player') {
+          const other = a.tag === 'player' ? b : a
+          // ① 正被牵住 ⇒ 豁免（D-027）
+          if (held.has(other.id)) continue
+          // ② 刚脱离且仍在主角体内 ⇒ 豁免，直到分开（D-033，实机反馈 #4）
+          if (other.ignorePlayer) continue
         }
+
         if (!boundsOverlap(a, b)) continue
         const c = collide(a, b)
         if (c !== null) this.contacts.push(c)
@@ -455,12 +528,23 @@ export class World {
     }
   }
 
-  private heldTargetIds(): Set<number> {
-    const s = new Set<number>()
-    for (const r of this.ropes) {
-      if (r.state === 'attached' && r.targetId >= 0) s.add(r.targetId)
+  /**
+   * 每 tick 检查"脱离豁免"是否该撤销：一旦物体与主角的包围盒**不再重叠**，
+   * 就恢复正常碰撞。用包围盒而不是精确形状，是为了让豁免撤销得**更保守**
+   * （宁可多豁免一帧，也不要在还嵌着的时候突然恢复碰撞）。
+   */
+  private updateIgnoreFlags(): void {
+    const p = this.player
+    const phw = p.shape.kind === 'aabb' ? p.shape.hw : p.shape.radius
+    const phh = p.shape.kind === 'aabb' ? p.shape.hh : p.shape.radius
+    for (const b of this.bodies) {
+      if (!b.ignorePlayer) continue
+      const shw = b.shape.kind === 'aabb' ? b.shape.hw : b.shape.radius
+      const shh = b.shape.kind === 'aabb' ? b.shape.hh : b.shape.radius
+      const separated =
+        Math.abs(b.pos.x - p.pos.x) > phw + shw || Math.abs(b.pos.y - p.pos.y) > phh + shh
+      if (separated) b.ignorePlayer = false
     }
-    return s
   }
 
   // ── 8. 撞击事件与伤害 ───────────────────────────────
@@ -612,19 +696,17 @@ export class World {
     setMass(p, grounded ? C.PLAYER_MASS_GROUNDED : C.PLAYER_MASS_AIRBORNE)
   }
 
-  // ── 11. 断弦 ────────────────────────────────────────
-
-  private checkRopeBreaks(): void {
-    for (const r of this.ropes) {
-      if (r.state !== 'attached') continue
-      if (!(r.tension > this.config.tensionMax)) continue
-      const targetId = r.targetId
-      const tension = r.tension
-      this.detach(r, 'over-tension')
-      this.events.push({ kind: 'rope-broken', rope: r.index, target: targetId, tension })
-      this.stunRemaining = C.BREAK_STUN_SEC
-    }
-  }
+  // ── 11. 断弦：**已取消**（D-032）─────────────────────
+  //
+  // v0.2.0 这里会做"张力超限 → 断丝 + 0.8s 硬直"。创始人在第 3 轮实机反馈中指出
+  // 这个机制**无法掌握**："丝线什么时候会断太难掌握了"。
+  //
+  // 现在改为：张力到顶**不断裂**，而是由 solveRopeConstraints() 变成刚性约束
+  // （轻的一端被拉过来、重的一端拉不动）。于是"张力"从一件**不可预测的危险**
+  // 变成一条**可预测的能力边界**，玩家随时知道自己在什么状态。
+  //
+  // 需要变的还有 SRS 的 FR-PHY-006（超限断裂 + 硬直），见 D-032 的影响面。
+  // `stunRemaining` 与"硬直期间不响应输入"的机制保留，留给以后的其他硬直来源。
 
   // ── 13. Verlet 链（表现）────────────────────────────
 
@@ -705,7 +787,16 @@ export class World {
   stateValues(): number[] {
     const out: number[] = [this.tick, this.stunRemaining]
     for (const b of this.bodies) {
-      out.push(b.pos.x, b.pos.y, b.vel.x, b.vel.y, b.mass, b.hp, b.alive ? 1 : 0)
+      out.push(
+        b.pos.x,
+        b.pos.y,
+        b.vel.x,
+        b.vel.y,
+        b.mass,
+        b.hp,
+        b.alive ? 1 : 0,
+        b.ignorePlayer ? 1 : 0,
+      )
     }
     for (const r of this.ropes) {
       out.push(

@@ -103,6 +103,18 @@ export interface Body {
   /** 是否可被丝线附着（FR-PHY-013）。无相本体需"墨丝"心法，R1 不涉及。 */
   anchorable: boolean
 
+  /**
+   * **脱离豁免**：暂时不与主角发生碰撞，直到两者彻底分开为止。
+   *
+   * 为什么需要：丝线被收短时，被牵物体会**进到主角身体内部**——实测摆动中石块到主角
+   * 中心最近只有 `0.129 m`，而主角半宽 0.4 / 半高 0.8。断丝的瞬间如果立刻恢复碰撞，
+   * 求解器会把这个"嵌在身体里"的物体猛地推出去，**主角被一起撞飞**（第 3 轮实机反馈 #4）。
+   *
+   * 规则很简单也很物理：**已经在你身体里的东西，不该再"撞"你一次。**
+   * 每 tick 检查，一旦两者分开就自动撤销豁免，恢复正常碰撞。
+   */
+  ignorePlayer: boolean
+
   /** ── 以下为每 tick 由 refreshDerived() 刷新的派生量（FR-PHY-014）── */
   /** 动量 p = m·v */
   momentum: Vec2
@@ -151,6 +163,7 @@ export function createBody(init: BodyInit): Body {
     friction: init.friction ?? DEFAULT_FRICTION,
     grounded: false,
     anchorable: init.anchorable ?? false,
+    ignorePlayer: false,
     momentum: { x: 0, y: 0 },
     kineticEnergy: 0,
     hp,

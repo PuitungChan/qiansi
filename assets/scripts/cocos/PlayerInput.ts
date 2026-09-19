@@ -66,6 +66,12 @@ export class PlayerInput {
   /** 本 tick 待消费的一次性事件 */
   private pendingAttach: CcVec2 | null = null
   private pendingCutPoint: CcVec2 | null = null
+  /**
+   * 右键 = 断丝（就近）。
+   * `qWasDown` 用于 Q 键的边沿检测——否则按住 Q 会每个 tick 都断一次。
+   */
+  private pendingCutNearest = false
+  private qWasDown = false
   private reelPulse = 0
   private reelPulseDir: ReelCommand = 'hold'
 
@@ -131,7 +137,17 @@ export class PlayerInput {
   // ── 鼠标 ────────────────────────────────────────────
 
   private onMouseDown(e: EventMouse): void {
-    if (e.getButton() !== EventMouse.BUTTON_LEFT) return
+    const button = e.getButton()
+
+    // 右键 = 断丝（就近一根）。这是第 3 轮实机反馈后的**主手段**：
+    // 「点击丝线太需要精细度」——需求只规定了点击这一条路（FR-ACT-004），
+    // 但没规定不能用右键；保留点击作为备选，同时给一条不依赖精度的路。
+    if (button === EventMouse.BUTTON_RIGHT) {
+      this.pendingCutNearest = true
+      return
+    }
+
+    if (button !== EventMouse.BUTTON_LEFT) return
     const loc = e.getUILocation()
     const p = this.mouse
     p.down = true
@@ -161,11 +177,15 @@ export class PlayerInput {
     if (!p.down) return
     const loc = e.getUILocation()
     p.down = false
+    const heldMs = nowMs() - p.downAt
     if (p.dragged) {
       // 拖拽松手 = 牵（FR-ACT-005）
       this.pendingAttach = new CcVec2(loc.x, loc.y)
+    } else if (heldMs >= HOLD_MS) {
+      // 按住不动 = 收丝（设计 §7「按住不放」）。收丝在按住期间已经逐 tick 生效，
+      // 松手时不需要再做任何事。
     } else {
-      // 原地点击 = 尝试断丝（FR-ACT-004「丝线即按钮」）
+      // 轻点（< 180ms 且没移动）= 尝试断丝（FR-ACT-004「丝线即按钮」）
       this.pendingCutPoint = new CcVec2(loc.x, loc.y)
     }
     this.aiming = false
@@ -267,15 +287,30 @@ export class PlayerInput {
     }
 
     let cutRope = -1
-    if (this.pendingCutPoint !== null) {
+    // 优先级：右键（就近） > 轻点丝线 > Q 键（就近）
+    if (this.pendingCutNearest) {
+      cutRope = sc.world.pickNearestRope(sc.player.pos)
+      this.pendingCutNearest = false
+    } else if (this.pendingCutPoint !== null) {
       const p = uiToWorld(this.pendingCutPoint.x, this.pendingCutPoint.y)
       cutRope = sc.world.pickRope(p)
       this.pendingCutPoint = null
+    } else {
+      const qDown = this.keys.has(KeyCode.KEY_Q)
+      if (qDown && !this.qWasDown) cutRope = sc.world.pickNearestRope(sc.player.pos)
+      this.qWasDown = qDown
     }
 
     let reel: ReelCommand = 'hold'
     if (this.keys.has(KeyCode.SPACE)) reel = 'in'
     else if (this.keys.has(KeyCode.SHIFT_LEFT) || this.keys.has(KeyCode.SHIFT_RIGHT)) reel = 'out'
+
+    // 按住左键不动 = 收丝（设计 §7「按住不放」）。
+    // 与"轻点断丝"用时间阈值分开：< 180ms 是点击，≥ 180ms 是按住。
+    if (reel === 'hold' && this.mouse.down && !this.mouse.dragged) {
+      if (nowMs() - this.mouse.downAt >= HOLD_MS) reel = 'in'
+    }
+
     if (this.reelPulse > 0) {
       reel = this.reelPulseDir
       this.reelPulse--

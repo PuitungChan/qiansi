@@ -16,7 +16,7 @@ import {
   ARMOR_PATROL_MAX_X,
   ARMOR_PATROL_MIN_X,
 } from '../assets/scripts/core/scene_m0'
-import { TENSION_BREAK_FORCE_BASE } from '../assets/scripts/core/constants'
+import { TENSION_LIMIT_BASE } from '../assets/scripts/core/constants'
 
 test('M0 房间只包含设计规定的那些刚体（不多不少）', () => {
   const sc = new M0Scenario()
@@ -54,7 +54,7 @@ test('开局主角已着地、石块已落稳（不能一进游戏就在抖）',
   assert.ok(Math.hypot(sc.stone.vel.x, sc.stone.vel.y) < 0.1)
 })
 
-test('收丝能把石块甩起来，且纯收丝不会自己把丝绷断', () => {
+test('纯收丝不会把丝绷断（D-032：张力到顶改为变刚性）', () => {
   const sc = new M0Scenario()
   sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
 
@@ -66,22 +66,23 @@ test('收丝能把石块甩起来，且纯收丝不会自己把丝绷断', () =>
     maxSpeed = Math.max(maxSpeed, Math.hypot(sc.stone.vel.x, sc.stone.vel.y))
   }
 
-  assert.equal(sc.world.ropes[0]!.state, 'attached', '纯收丝不该断弦')
-  assert.equal(sc.world.stunRemaining, 0, '不该触发硬直')
-  assert.ok(maxSpeed > 8, `石块应能被明显甩动，实际最高 ${maxSpeed.toFixed(2)} m/s`)
+  assert.equal(sc.world.ropes[0]!.state, 'attached', '纯收丝不该断丝')
+  assert.equal(sc.world.stunRemaining, 0, '不该有硬直')
+  assert.ok(maxSpeed > 3, `石块应能被收丝拉动，实际最高 ${maxSpeed.toFixed(2)} m/s`)
   assert.ok(
-    peakTension / TENSION_BREAK_FORCE_BASE < 0.95,
-    `收丝张力应留有余量，实际占 ${((peakTension / TENSION_BREAK_FORCE_BASE) * 100).toFixed(1)}%`,
+    peakTension <= sc.world.config.tensionMax + 1e-6,
+    `张力必须被夹在上限内，实际 ${peakTension.toFixed(1)} / ${sc.world.config.tensionMax}`,
   )
+  assert.ok(TENSION_LIMIT_BASE > 0)
 })
 
 test('甩动 + 奔跑能把石块加速到设计中"投石"所需的量级（≥ 15 m/s）', () => {
   const sc = new M0Scenario()
   sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
-  // 先收一点把石块拉起来，再左右摆动
-  for (let i = 0; i < 30; i++) sc.step(input({ reel: 'in' }))
+  // 一边左右摆动一边持续收丝。这是"要在摆动中收丝"的教学点：
+  // 单纯把石块拖到脚边（只收丝不摆动）拿不到速度——没有角动量就没有 v ∝ 1/r。
   let maxSpeed = 0
-  for (let i = 0; i < 300; i++) {
+  for (let i = 0; i < 400; i++) {
     sc.step(input({ moveX: Math.floor(i / 60) % 2 === 0 ? 1 : -1, reel: 'in' }))
     if (sc.world.ropes[0]!.state !== 'attached') break
     maxSpeed = Math.max(maxSpeed, Math.hypot(sc.stone.vel.x, sc.stone.vel.y))

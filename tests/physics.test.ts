@@ -147,39 +147,105 @@ test('AC-21 断丝后该丝位 1.5s 不可用，之后自动恢复（FR-PHY-007�
   assert.equal(world.ropes[0]!.state, 'attached', '冷却结束后应可再次附着')
 })
 
-// ── FR-PHY-004/006：张力与超限断弦 ───────────────────────
+// ── 张力：到顶变刚性（D-032，取代 FR-PHY-006 的"超限断裂"）────────
 
-test('收丝机在额定负载处堵转：一直按住收丝不会自己把丝绷断', () => {
+test('一直按住收丝不会把丝绷断（D-032）', () => {
   const sc = new M0Scenario()
   sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
   for (let i = 0; i < 300; i++) sc.step(input({ reel: 'in' }))
 
   const r = sc.world.ropes[0]!
-  assert.equal(r.state, 'attached', '纯收丝不应导致断弦')
+  assert.equal(r.state, 'attached', '纯收丝不应导致断丝')
   assert.ok(
-    r.tension < sc.world.config.tensionMax,
-    `张力应停在额定值以下，实际 ${r.tension.toFixed(1)}`,
+    r.tension <= sc.world.config.tensionMax + 1e-6,
+    `张力应被夹在上限内，实际 ${r.tension.toFixed(1)}`,
   )
   assert.equal(sc.world.stunRemaining, 0)
 })
 
-test('超限断弦：张力过载时断裂并硬直 0.8s（FR-PHY-006）', () => {
+test('D-032 张力到顶不再断丝，而是拉紧（取代 FR-PHY-006 的"超限断裂"）', () => {
   const sc = new M0Scenario()
   sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
 
-  // 模拟"被猛拽"：给石块一个远离主角的高速
+  // 模拟"被猛拽"：给石块一个远离主角的高速。旧版这里会断丝 + 硬直。
   sc.stone.vel = { x: 30, y: 20 }
-  let brokeOn = -1
-  for (let i = 0; i < 30; i++) {
+  let peak = 0
+  for (let i = 0; i < 90; i++) {
     sc.step(NO_INPUT)
-    if (sc.world.ropes[0]!.state !== 'attached') {
-      brokeOn = i
-      break
-    }
+    peak = Math.max(peak, sc.world.ropes[0]!.tension)
   }
-  assert.ok(brokeOn >= 0, '过载应导致断弦')
-  assert.equal(sc.world.ropes[0]!.lastBreakReason, 'over-tension')
-  assert.ok(sc.world.stunRemaining > 0.7, `硬直应接近 0.8s，实际 ${sc.world.stunRemaining}`)
+
+  assert.equal(sc.world.ropes[0]!.state, 'attached', '过载不该断丝')
+  assert.equal(sc.world.stunRemaining, 0, '不该有硬直')
+  assert.ok(peak <= sc.world.config.tensionMax + 1e-6, `峰值 ${peak.toFixed(1)} 应不超上限`)
+  // 被猛拽之后应该被"拉回来"，而不是飞走
+  assert.ok(
+    Math.hypot(sc.stone.vel.x, sc.stone.vel.y) < 30,
+    '石块应被拉紧的丝减速，而不是带着 30 m/s 飞走',
+  )
+})
+
+test('D-032 拉紧时：轻的一端被拉向重的一端（着地的主角几乎不动）', () => {
+  const { world, player } = flatScene()
+  const heavy = addProp(world, { x: 6, mass: 40, radius: 1 })
+  world.step(input({ aimPoint: { x: heavy.pos.x, y: heavy.pos.y }, attachPressed: true }))
+  assert.equal(player.grounded, true)
+
+  const px0 = player.pos.x
+  const hx0 = heavy.pos.x
+  for (let i = 0; i < 90; i++) world.step(input({ reel: 'in' }))
+
+  assert.ok(Math.abs(player.pos.x - px0) < 0.3, '着地主角几乎不动')
+  assert.ok(Math.abs(heavy.pos.x - hx0) > 1, '重物被拉过来')
+})
+
+test('D-032 拉紧时：主角离地且物体更重 ⇒ 主角被拉过去', () => {
+  const { world, player } = flatScene()
+
+  player.pos = { x: 0, y: 8 }
+  player.vel = { x: 0, y: 0 }
+  runIdle(world, 1)
+  assert.equal(player.grounded, false)
+
+  const heavy = addProp(world, { x: 6, mass: 40, radius: 1 })
+  world.step(input({ aimPoint: { x: heavy.pos.x, y: heavy.pos.y }, attachPressed: true }))
+
+  const px0 = player.pos.x
+  for (let i = 0; i < 90; i++) world.step(input({ reel: 'in' }))
+  assert.ok(Math.abs(player.pos.x - px0) > 1, '离地主角应被更重的物体拉走')
+})
+
+test('D-033 断丝时物体若在主角体内，不应把主角撞飞（实机反馈 #4）', () => {
+  const sc = new M0Scenario()
+  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  // 疯狂收丝，把石块收进主角身体里
+  for (let i = 0; i < 120; i++) sc.step(input({ reel: 'in' }))
+
+  const d = Math.hypot(sc.stone.pos.x - sc.player.pos.x, sc.stone.pos.y - sc.player.pos.y)
+  assert.ok(d < 1.0, `石块应已被收到主角身边，实际距离 ${d.toFixed(2)}`)
+
+  const px0 = sc.player.pos.x
+  sc.step(input({ cutRope: 0 }))
+  assert.equal(sc.stone.ignorePlayer, true, '断丝瞬间应进入脱离豁免')
+  for (let i = 0; i < 30; i++) sc.step(NO_INPUT)
+
+  assert.ok(
+    Math.abs(sc.player.pos.x - px0) < 0.5,
+    `断丝不该把主角撞飞，实际位移 ${(sc.player.pos.x - px0).toFixed(2)}`,
+  )
+})
+
+test('脱离豁免在两者分开后自动撤销（恢复正常碰撞）', () => {
+  const sc = new M0Scenario()
+  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  for (let i = 0; i < 120; i++) sc.step(input({ reel: 'in' }))
+  sc.step(input({ cutRope: 0 }))
+  assert.equal(sc.stone.ignorePlayer, true)
+
+  // 把石块扔远，等它离开主角的包围盒
+  sc.stone.pos = { x: sc.player.pos.x + 6, y: 3 }
+  sc.step(NO_INPUT)
+  assert.equal(sc.stone.ignorePlayer, false, '分开之后应恢复碰撞')
 })
 
 test('硬直期间不响应移动输入（FR-PHY-006）', () => {

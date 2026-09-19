@@ -18,10 +18,13 @@ import { DEMO_TICKS, demoScript, runDemo } from '../assets/scripts/core/demo'
 import { M0Scenario } from '../assets/scripts/core/scene_m0'
 
 /**
- * 0.2.0 基线哈希（M0 首次落库）。
- * 更新本常量时必须在 CHANGELOG 说明"为什么这次手感变化是对的"。
+ * 基线哈希。更新本常量时必须在 CHANGELOG 说明"为什么这次手感变化是对的"。
+ *
+ * 变更历史：
+ * - `3c7f7016969b215f` v0.2.0 首版（张力超限会断丝）
+ * - `8cf4d9e30c0b2f0e` D-032 起：张力到顶改为刚性约束，不再断丝
  */
-const EXPECTED_HASH = '3c7f7016969b215f'
+const EXPECTED_HASH = '8cf4d9e30c0b2f0e'
 
 test('演示脚本长度固定且不含任何随机性', () => {
   const a = demoScript()

@@ -2,7 +2,7 @@
  * 丝线内核：张力模型、收放钳制、Verlet 绳索、断丝命中几何。
  *
  * 对应：FR-PHY-001 / FR-PHY-002 / FR-PHY-010 / FR-ACT-009 / AC-19
- * 口径依据：DECISIONS D-021（张力模型）、D-029（显示刻度 vs 物理断裂载荷）
+ * 口径依据：DECISIONS D-021（张力模型）、D-029（显示刻度 vs 物理载荷）、D-032（到顶变刚性）
  */
 
 import assert from 'node:assert/strict'
@@ -10,9 +10,10 @@ import test from 'node:test'
 import {
   ROPE_LEN_MAX,
   ROPE_LEN_MIN,
+  ROPE_MAX_STRETCH,
   ROPE_SEGMENTS,
   ROPE_STIFFNESS,
-  TENSION_BREAK_FORCE_BASE,
+  TENSION_LIMIT_BASE,
 } from '../assets/scripts/core/constants'
 import {
   chainPoints,
@@ -65,13 +66,21 @@ test('轴向相对速度通过阻尼项增加张力，反向则减小但不会�
   )
 })
 
-test('物理断裂载荷与显示刻度的关系（D-029）', () => {
-  // 显示刻度 400、物理载荷 1200 N；两者比例就是 HUD 上要显示的百分比余量
-  assert.equal(TENSION_BREAK_FORCE_BASE, 1200)
-  // 静吊石块(4)：80 N，占 7%
-  const hang = ropeTension({ ...base, length: 6 + 0.08, targetLength: 6 })
-  assert.ok(Math.abs(hang - 80) < 1e-9)
-  assert.ok(hang / TENSION_BREAK_FORCE_BASE < 0.1)
+test('张力上限与显示刻度的关系（D-029 / D-032）', () => {
+  // 设计文档的 0–400 是**显示刻度**；物理上限是 1200 N
+  assert.equal(TENSION_LIMIT_BASE, 1200)
+  // 刚度必须由"上限 ÷ 弹性余量"推出，否则"拉到 100%"与"拉长到极限"会对不上
+  assert.ok(Math.abs(ROPE_STIFFNESS - TENSION_LIMIT_BASE / ROPE_MAX_STRETCH) < 1e-9)
+
+  // 拉长到弹性余量 ⇒ 张力恰好 100%
+  const atLimit = ropeTension({ ...base, length: 6 + ROPE_MAX_STRETCH, targetLength: 6 })
+  assert.ok(Math.abs(atLimit - TENSION_LIMIT_BASE) < 1e-6)
+
+  // 静吊石块(4)：只需要 80 N ⇒ 伸长极少，远低于上限
+  const hangExtension = (4 * 20) / ROPE_STIFFNESS
+  const hang = ropeTension({ ...base, length: 6 + hangExtension, targetLength: 6 })
+  assert.ok(Math.abs(hang - 80) < 1e-6)
+  assert.ok(hang / TENSION_LIMIT_BASE < 0.1)
 })
 
 test('等效质量：两端可动走标准公式；有静态端时退化为可动端质量', () => {
