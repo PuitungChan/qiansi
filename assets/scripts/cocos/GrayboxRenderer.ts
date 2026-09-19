@@ -13,6 +13,7 @@
 
 import { Color, Graphics } from 'cc'
 import type { Body, Shape } from '../core/body'
+import { M0_ROOM_H } from '../core/constants'
 import type { PlayableScene } from '../core/playable'
 import { chainPoints } from '../core/rope'
 import { metersToPx, worldToLocal } from './Coordinates'
@@ -22,6 +23,8 @@ const C = {
   ground: new Color(58, 58, 62, 255),
   wall: new Color(46, 46, 50, 255),
   ceiling: new Color(46, 46, 50, 255),
+  /** 悬吊物连到天花板的那条虚线（比墙略亮一点，读得出"吊着"） */
+  hang: new Color(72, 72, 78, 255),
   player: new Color(216, 216, 216, 255),
   playerAir: new Color(150, 170, 190, 255),
   stone: new Color(168, 168, 172, 255),
@@ -124,11 +127,35 @@ export class GrayboxRenderer {
 
   private drawTerrain(g: Graphics, sc: PlayableScene): void {
     for (const b of sc.world.bodies) {
-      if (b.kind !== 'static') continue
-      const fill =
-        b.name === 'ground' ? C.ground : b.name === 'ceiling' ? C.ceiling : C.wall
-      this.fillAabb(g, b.pos.x, b.pos.y, halfW(b.shape), halfH(b.shape), fill)
+      if (b.kind !== 'static' || b.removed) continue
+      // 按**名字语义**上色：地面/沟底用亮一档的灰，墙与天花板暗一档。
+      // 不按具体名字硬编码，这样加新地形（深沟、平台）不用改渲染层。
+      const isFloor = b.name.includes('ground') || b.name.includes('floor')
+      // ── 悬吊物：画一条细线连到天花板 ──
+      //
+      // 「悬吊横梁」「对岸吊桩」都是**悬在空中的**静态结构。灰盒里如果只画一个方块，
+      // 玩家看到的是"浮在空中的石头"，读不出"这是可以勾住的吊点"，
+      // 而这一段（8:00–12:00）的全部玩法就是找到这两个吊点。
+      // 一条竖线花不了几个像素，却把它变成"吊在那儿的"。
+      // 判据同样是名字语义（swing/post），不硬编码具体 id。
+      if (b.name.includes('swing') || b.name.includes('post')) {
+        this.strokeHangLine(g, b.pos.x, b.pos.y + halfH(b.shape))
+      }
+      this.fillAabb(g, b.pos.x, b.pos.y, halfW(b.shape), halfH(b.shape), isFloor ? C.ground : C.wall)
     }
+  }
+
+  /** 从 (x, y) 往上画一条虚线到天花板。虚线节距固定，不含时间，录屏可复现。 */
+  private strokeHangLine(g: Graphics, x: number, y: number): void {
+    const from = worldToLocal({ x, y })
+    const to = worldToLocal({ x, y: M0_ROOM_H })
+    g.strokeColor = C.hang
+    g.lineWidth = 2
+    for (let py = from.y; py < to.y; py += 16) {
+      g.moveTo(from.x, py)
+      g.lineTo(from.x, Math.min(py + 8, to.y))
+    }
+    g.stroke()
   }
 
   private drawBodies(g: Graphics, sc: PlayableScene): void {

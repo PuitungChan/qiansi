@@ -45,6 +45,8 @@ export type TelemetryKind =
   | 'hint_glow'
   /** 进入新的序章段落（`name` 是段落名） */
   | 'stage'
+  /** 掉进深沟、被软重生拉回沟边 */
+  | 'fall'
   /** 试玩结束 */
   | 'run_end'
 
@@ -172,6 +174,25 @@ export class Telemetry {
   /** 进入新的序章段落。分析时用它把时间线切成"他花了多久过第一段"。 */
   markStage(tick: number, name: string): void {
     this.push(tick, 'stage', { name, afterEncounterSec: this.sinceEncounter(tick) })
+  }
+
+  /** 掉进深沟（软重生）。R1 不实现死亡，所以这是"兜底"而不是"失败"。 */
+  markFall(tick: number, count: number): void {
+    this.push(tick, 'fall', { n: count })
+  }
+
+  /** 某段落开始的绝对 tick；没进过返回 -1。 */
+  stageStartTick(name: string): number {
+    for (const e of this.events) {
+      if (e.kind === 'stage' && e.name === name) return e.tick
+    }
+    return -1
+  }
+
+  /** 距某段落开始过了几秒；没进过返回 0。 */
+  sinceStageSec(tick: number, name: string): number {
+    const t0 = this.stageStartTick(name)
+    return t0 < 0 ? 0 : (tick - t0) / TICK_HZ
   }
 
   /** 某段落开始的秒数（相对试玩开始）；没进过返回 null。 */

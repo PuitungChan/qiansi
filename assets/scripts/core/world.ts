@@ -119,6 +119,14 @@ export class World {
   tick = 0
   /** 超限断弦后的硬直剩余时间（FR-PHY-006）。 */
   stunRemaining = 0
+  /**
+   * **已解锁的丝位数**（FR-PRG-006：随进度 1→2→3→4）。
+   *
+   * 序章从 1 根开始，8:00 解锁第 2 根。实现方式是**预建全部丝位、只放行前 N 个**——
+   * 而不是运行时往 `ropes` 数组里 push（数组下标就是丝位编号，一 push 就会让
+   * HUD 顺序与状态哈希漂移）。构造期的 `config.ropeCount` 是**总槽位数**。
+   */
+  unlockedRopes: number
 
   private fx: Float64Array
   private fy: Float64Array
@@ -138,6 +146,7 @@ export class World {
       this.ropes.push(createRope(i))
       this.chains.push(null)
     }
+    this.unlockedRopes = this.config.ropeCount
   }
 
   // ── 装配 ────────────────────────────────────────────
@@ -331,7 +340,10 @@ export class World {
   }
 
   private firstIdleRope(): Rope | null {
-    for (const r of this.ropes) if (r.state === 'idle') return r
+    for (let i = 0; i < this.unlockedRopes; i++) {
+      const r = this.ropes[i]
+      if (r !== undefined && r.state === 'idle') return r
+    }
     return null
   }
 
@@ -553,10 +565,19 @@ export class World {
           //    断丝瞬间会被求解器猛推出去把主角撞飞（反馈 #4）。两者一次解决。
           //    prop 是可以随手摆弄的东西，不该成为地形。
           if (other.tag === 'prop') continue
-          // ② 正被牵住 ⇒ 豁免（D-027 的残留，对敌人等非 prop 仍然适用）
-          if (held.has(other.id)) continue
-          // ③ 刚脱离且仍在主角体内 ⇒ 豁免，直到分开（D-033）
-          if (other.ignorePlayer) continue
+          // ②③ 只对**可动物体**豁免：正被牵住（D-027 的残留）、刚脱离还在体内（D-033）。
+          //
+          //    **静态结构必须始终和主角碰撞**（D-050）。批 4 之前这里对"被牵住的"一律
+          //    豁免，于是"连上主横梁、收丝"会把主角**拉进横梁内部**：横梁不动，
+          //    主角穿过去了。更糟的是丝线锚点是"离主角最近的表面点"（D-048），
+          //    手一旦进入横梁内部，锚点就变成手自己、绳长塌成 0，约束**瞬间消失** ——
+          //    于是主角被"拉一下、穿过去、掉下来、再被拉一下"，在梁里
+          //    以 ±25 m/s 的竖直速度**永久抖动**（实测）。
+          //    静态目标本来就拉不动，豁免它没有任何收益，所以只豁免可动物体。
+          if (other.kind !== 'static') {
+            if (held.has(other.id)) continue
+            if (other.ignorePlayer) continue
+          }
         }
 
         if (!boundsOverlap(a, b)) continue
@@ -757,6 +778,15 @@ export class World {
       if (other.tag === 'hazard') continue
       // 站得住的"实体"：静态地形，或质量足够大的动态物体。
       if (other.kind !== 'static' && other.damageMass < 5) continue
+      // **深穿透不算"站得住"**。
+      //
+      // 正常接触经过位置修正之后穿透量在 0.01 以下；反过来，穿透到十几厘米说明
+      // 求解器**没能把人推出来**——人被挤在两个结构之间（实测：悬吊横梁顶面到主横梁
+      // 底面只有 1.05m，而主角高 1.6m，收丝贴上去就被永久卡住 0.548m）。
+      // 那种状态下的接触法线是"从人指向脚下的结构"，会被当成着地，
+      // 于是玩家**嵌在 12 米高的横梁里被判成"站在对岸"**、直接通关。
+      // 卡住是几何问题（缝要比人高），但"嵌在里面算不算站住"是判定问题，在这里拦掉。
+      if (c.penetration > C.GROUNDED_MAX_PENETRATION) continue
       // 由主角指向对方的法线；脚踩实体 ⇒ 对方在下方 ⇒ ny < 0。
       const ny = c.a === p ? c.normal.y : -c.normal.y
       if (ny <= -C.GROUNDED_NORMAL_Y) {
@@ -844,9 +874,9 @@ export class World {
     return best
   }
 
-  /** HUD 用：每根丝位的占用状态（FR-UI-001 的 4 枚圆点）。 */
+  /** HUD 用：**已解锁**丝位的占用状态（FR-UI-001 的圆点）。 */
   ropeDisplay(): { index: number; state: 'idle' | 'attached' | 'recovering'; tension: number; ratio: number }[] {
-    return this.ropes.map((r) => ({
+    return this.ropes.slice(0, this.unlockedRopes).map((r) => ({
       index: r.index,
       state: r.state,
       tension: r.tension,
@@ -858,7 +888,7 @@ export class World {
 
   /** 参与哈希的全部状态量，顺序固定。 */
   stateValues(): number[] {
-    const out: number[] = [this.tick, this.stunRemaining]
+    const out: number[] = [this.tick, this.stunRemaining, this.unlockedRopes]
     for (const b of this.bodies) {
       out.push(
         b.pos.x,
