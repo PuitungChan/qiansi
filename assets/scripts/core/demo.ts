@@ -53,7 +53,10 @@ export interface DemoPlan {
 }
 
 function attachFrame(sc: M0Scenario): InputFrame {
-  return input({ attachPressed: true, aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y } })
+  // 第 13 轮起是"松手发射"：丝要先飞过去（`flying`），到位才拉。
+  // 下面 `REEL_TICKS` 那段里前面的几帧因此是空转——**搜索器会用同一套规则模拟**，
+  // 所以它自己会把有效收丝量算进去，不需要在这里手工补偿。
+  return input({ firePressed: true, aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y } })
 }
 
 /** 摆动阶段的输入：左右来回 + 持续收丝。 */

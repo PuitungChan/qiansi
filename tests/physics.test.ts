@@ -10,7 +10,7 @@ import test from 'node:test'
 import { PLAYER_MASS_AIRBORNE, PLAYER_MASS_GROUNDED, ROPE_RECONGEAL_SEC } from '../assets/scripts/core/constants'
 import { input } from '../assets/scripts/core/input'
 import { M0Scenario } from '../assets/scripts/core/scene_m0'
-import { addEnemy, addProp, emptyWorld, flatScene, NO_INPUT, runIdle, speedOf } from './helpers'
+import { addEnemy, addProp, emptyWorld, fire, fireNoWait, flatScene, NO_INPUT, rawHost, runIdle, speedOf } from './helpers'
 
 // ── FR-PHY-003 / AC-20：着地 / 离地的等效质量 ──────────────
 
@@ -35,7 +35,7 @@ test('AC-20 主角着地时等效质量视为 ∞，离地时为 0.5（FR-PHY-00
 test('AC-20 着地时甩得动重物（主角是锚点，自己不动）', () => {
   const { world, player } = flatScene()
   const heavy = addProp(world, { x: 6, mass: 40, radius: 1 })
-  world.step(input({ aimPoint: { x: heavy.pos.x, y: heavy.pos.y }, attachPressed: true }))
+  fire(rawHost(world), heavy.pos)
 
   const playerX0 = player.pos.x
   const heavyX0 = heavy.pos.x
@@ -59,7 +59,7 @@ test('AC-20 离地时被重物拉走（物体是锚点，主角飞过去）', ()
   assert.equal(player.grounded, false)
 
   const heavy = addProp(world, { x: 6, mass: 40, radius: 1 })
-  world.step(input({ aimPoint: { x: heavy.pos.x, y: heavy.pos.y }, attachPressed: true }))
+  fire(rawHost(world), heavy.pos)
   assert.equal(world.ropes[0]!.state, 'attached')
 
   const playerX0 = player.pos.x
@@ -80,7 +80,7 @@ test('AC-20 离地时被重物拉走（物体是锚点，主角飞过去）', ()
 test('AC-19 松弛的丝不产生任何力，也不会把物体推开', () => {
   const { world, player } = flatScene()
   const prop = addProp(world, { x: 5, mass: 4 })
-  world.step(input({ aimPoint: { x: prop.pos.x, y: prop.pos.y }, attachPressed: true }))
+  fire(rawHost(world), prop.pos)
   assert.equal(world.ropes[0]!.state, 'attached')
 
   // 放丝把丝放到最长 → 松弛
@@ -98,7 +98,7 @@ test('AC-19 松弛的丝不产生任何力，也不会把物体推开', () => {
 test('AC-19 连接瞬间不产生拉力（D-020：丝长 = 当前距离）', () => {
   const s = flatScene()
   const prop = addProp(s.world, { x: 5, mass: 4 })
-  s.world.step(input({ aimPoint: { x: prop.pos.x, y: prop.pos.y }, attachPressed: true }))
+  fire(rawHost(s.world), prop.pos)
   const r = s.world.ropes[0]!
   assert.equal(r.state, 'attached')
   assert.equal(r.tension, 0)
@@ -108,7 +108,7 @@ test('AC-19 连接瞬间不产生拉力（D-020：丝长 = 当前距离）', () 
 test('AC-19 放丝与断丝行为可区分（FR-PHY-011）', () => {
   const { world } = flatScene()
   const prop = addProp(world, { x: 5, mass: 4 })
-  world.step(input({ aimPoint: { x: prop.pos.x, y: prop.pos.y }, attachPressed: true }))
+  fire(rawHost(world), prop.pos)
 
   // 放丝：丝仍在，丝位仍可用
   for (let i = 0; i < 30; i++) world.step(input({ reel: 'out' }))
@@ -126,7 +126,7 @@ test('AC-19 放丝与断丝行为可区分（FR-PHY-011）', () => {
 test('AC-21 断丝后该丝位 1.5s 不可用，之后自动恢复（FR-PHY-007）', () => {
   const { world } = flatScene()
   const prop = addProp(world, { x: 5, mass: 4 })
-  world.step(input({ aimPoint: { x: prop.pos.x, y: prop.pos.y }, attachPressed: true }))
+  fire(rawHost(world), prop.pos)
   world.step(input({ cutRope: 0 }))
 
   assert.equal(world.ropes[0]!.state, 'recovering')
@@ -137,13 +137,13 @@ test('AC-21 断丝后该丝位 1.5s 不可用，之后自动恢复（FR-PHY-007�
   prop.vel = { x: 0, y: 0 }
   runIdle(world, 60)
   assert.equal(world.ropes[0]!.state, 'recovering')
-  world.step(input({ aimPoint: { x: prop.pos.x, y: prop.pos.y }, attachPressed: true }))
+  fireNoWait(rawHost(world), prop.pos)
   assert.equal(world.ropes[0]!.state, 'recovering', '冷却期内不应附着成功')
 
   // 90 tick = 1.5s
   runIdle(world, 40)
   assert.equal(world.ropes[0]!.state, 'idle')
-  world.step(input({ aimPoint: { x: prop.pos.x, y: prop.pos.y }, attachPressed: true }))
+  fire(rawHost(world), prop.pos)
   assert.equal(world.ropes[0]!.state, 'attached', '冷却结束后应可再次附着')
 })
 
@@ -151,7 +151,7 @@ test('AC-21 断丝后该丝位 1.5s 不可用，之后自动恢复（FR-PHY-007�
 
 test('一直按住收丝不会把丝绷断（D-032）', () => {
   const sc = new M0Scenario()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   for (let i = 0; i < 300; i++) sc.step(input({ reel: 'in' }))
 
   const r = sc.world.ropes[0]!
@@ -165,7 +165,7 @@ test('一直按住收丝不会把丝绷断（D-032）', () => {
 
 test('D-032 张力到顶不再断丝，而是拉紧（取代 FR-PHY-006 的"超限断裂"）', () => {
   const sc = new M0Scenario()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
 
   // 模拟"被猛拽"：给石块一个远离主角的高速。旧版这里会断丝 + 硬直。
   sc.stone.vel = { x: 30, y: 20 }
@@ -188,7 +188,7 @@ test('D-032 张力到顶不再断丝，而是拉紧（取代 FR-PHY-006 的"超�
 test('D-032 拉紧时：轻的一端被拉向重的一端（着地的主角几乎不动）', () => {
   const { world, player } = flatScene()
   const heavy = addProp(world, { x: 6, mass: 40, radius: 1 })
-  world.step(input({ aimPoint: { x: heavy.pos.x, y: heavy.pos.y }, attachPressed: true }))
+  fire(rawHost(world), heavy.pos)
   assert.equal(player.grounded, true)
 
   const px0 = player.pos.x
@@ -208,7 +208,7 @@ test('D-032 拉紧时：主角离地且物体更重 ⇒ 主角被拉过去', () 
   assert.equal(player.grounded, false)
 
   const heavy = addProp(world, { x: 6, mass: 40, radius: 1 })
-  world.step(input({ aimPoint: { x: heavy.pos.x, y: heavy.pos.y }, attachPressed: true }))
+  fire(rawHost(world), heavy.pos)
 
   const px0 = player.pos.x
   for (let i = 0; i < 90; i++) world.step(input({ reel: 'in' }))
@@ -258,7 +258,7 @@ test('主角仍然会与敌人碰撞（豁免只针对 prop）', () => {
 
 test('D-037 被丝牵住的物体不造成伤害（「断丝 = 攻击」，设计 §2.3）', () => {
   const sc = new M0Scenario()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   // 把墨甲搬到主角右侧，然后把石块收到它身上
   sc.armor.pos = { x: sc.player.pos.x + 2, y: 0.81 }
   let damageWhileHeld = 0
@@ -299,7 +299,7 @@ test('D-036 敌人不可被丝线附着（「墨丝」心法第四章才解锁�
   assert.equal(sc.armor.anchorable, false)
   // 站在墨甲旁边试着牵它 → 不该连上
   sc.player.pos = { x: sc.armor.pos.x - 2, y: sc.player.pos.y }
-  sc.step(input({ aimPoint: { x: sc.armor.pos.x, y: sc.armor.pos.y }, attachPressed: true }))
+  fire(sc, sc.armor.pos)
   assert.equal(sc.world.ropes[0]!.state, 'idle', 'R1 阶段不该能牵住敌人')
 })
 
@@ -334,7 +334,7 @@ test('D-039 投出的石块速度衰减不能太快（投掷射程回归护栏�
 
 test('D-033 断丝时物体若在主角体内，不应把主角撞飞（实机反馈 #4）', () => {
   const sc = new M0Scenario()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   // 疯狂收丝，把石块收进主角身体里
   for (let i = 0; i < 120; i++) sc.step(input({ reel: 'in' }))
 
@@ -354,7 +354,7 @@ test('D-033 断丝时物体若在主角体内，不应把主角撞飞（实机�
 
 test('脱离豁免在两者分开后自动撤销（恢复正常碰撞）', () => {
   const sc = new M0Scenario()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   for (let i = 0; i < 120; i++) sc.step(input({ reel: 'in' }))
   sc.step(input({ cutRope: 0 }))
   assert.equal(sc.stone.ignorePlayer, true)

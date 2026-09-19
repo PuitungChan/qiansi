@@ -48,6 +48,8 @@ import { PrologueScene } from '../core/scene_prologue'
 import type { Telemetry } from '../core/telemetry'
 import { DebugPanel, type DebugPanelState } from './DebugPanel'
 import { GrayboxRenderer, type RenderOptions } from './GrayboxRenderer'
+import { LabelLayer } from './LabelLayer'
+import { labelSpecs } from './labels'
 import { PlayerInput } from './PlayerInput'
 
 const { ccclass } = _decorator
@@ -69,6 +71,8 @@ export class QiansiBootstrap extends Component {
   private gfx!: Graphics
   private label!: Label
   private hintLabel!: Label
+  /** 小字标签层（第 13 轮：让物体一眼可分；L 键开关）。 */
+  private bodyLabels!: LabelLayer
 
   private acc = 0
   private lastFrame: InputFrame = EMPTY_INPUT
@@ -77,6 +81,8 @@ export class QiansiBootstrap extends Component {
   // 调试开关
   private showPrediction = true
   private showDebug = true
+  /** 小字标签（石/罐/卒/梁/桩）——灰盒读图辅助，L 切换。 */
+  private showLabels = true
   private slowMo = false
   private ropeCount = 1
   private demoMode = false
@@ -118,6 +124,14 @@ export class QiansiBootstrap extends Component {
       this.label = undefined as unknown as Label
       this.hintLabel = undefined as unknown as Label
       console.warn('[牵丝] 面板/提示节点创建失败，已自动关闭（不影响游戏本体）：', err)
+    }
+
+    // 小字标签层（第 13 轮）。单独一个 try：它挂了也只该关掉标签，不该影响别的东西。
+    try {
+      this.bodyLabels = new LabelLayer(this.node)
+    } catch (err) {
+      this.showLabels = false
+      console.warn('[牵丝] 标签层创建失败，已关闭小字标签：', err)
     }
 
     // 这行日志是给你排查用的：**看到它 = 脚本编译并运行了**；看不到 = 脚本压根没跑起来。
@@ -295,7 +309,28 @@ export class QiansiBootstrap extends Component {
     if (pressed(KeyCode.KEY_R)) this.scene.reset()
     if (pressed(KeyCode.KEY_P)) this.showPrediction = !this.showPrediction
     if (pressed(KeyCode.KEY_G)) this.showDebug = !this.showDebug
+    if (pressed(KeyCode.KEY_L)) this.showLabels = !this.showLabels
     if (pressed(KeyCode.KEY_T)) this.slowMo = !this.slowMo
+
+    // ── 数字键 = **调试跳段**（第 13 轮新增）──
+    //
+    // 段落出口改成纯进度门控之后（"做完上一步才进下一段"），一个卡在 3:00 的玩家
+    // 看不到后面的内容。数字键给开发者一条旁路：1 教学 / 2 遭遇战 / 3 质量差 /
+    // 4 双丝 / 5 已通关。它**不是游戏机制**，玩家路径上没有任何东西会调用它。
+    const stages = this.scene.debugStages?.() ?? []
+    const digits = [
+      KeyCode.DIGIT_1,
+      KeyCode.DIGIT_2,
+      KeyCode.DIGIT_3,
+      KeyCode.DIGIT_4,
+      KeyCode.DIGIT_5,
+    ]
+    for (let i = 0; i < digits.length && i < stages.length; i++) {
+      if (!pressed(digits[i]!)) continue
+      this.scene.debugSkip?.(stages[i]!)
+      console.log(`[牵丝] 调试跳段 → ${stages[i]}`)
+    }
+
     if (pressed(KeyCode.KEY_M)) {
       this.sceneKind = this.sceneKind === 'prologue' ? 'm0' : 'prologue'
       this.buildScene()
@@ -383,8 +418,17 @@ export class QiansiBootstrap extends Component {
       aimPoint: this.playerInput.isAiming ? this.playerInput.aimWorld : null,
       prediction: this.prediction,
       glowBodyId: this.scene.glowBodyId(),
+      isButtonDown: (id) => this.playerInput.isButtonDown(id),
     }
     this.renderer.draw(this.gfx, this.scene, opts)
+
+    // 小字标签（Graphics 画不了字，走 Label 节点池）
+    this.bodyLabels?.sync(
+      labelSpecs(this.scene, {
+        showLabels: this.showLabels,
+        isButtonDown: (id) => this.playerInput.isButtonDown(id),
+      }),
+    )
 
     // 极简提示（设计 §7）
     if (this.hintLabel !== undefined) {
@@ -395,7 +439,7 @@ export class QiansiBootstrap extends Component {
       this.drawPanelBackground(this.gfx)
       const state: DebugPanelState = {
         fps: this.fps,
-        sceneName: this.sceneKind === 'prologue' ? '序章·批1' : 'M0 沙盒',
+        sceneName: this.sceneKind === 'prologue' ? '序章（12 分钟）' : 'M0 沙盒',
         demoMode: this.demoMode,
         demoIndex: this.demoIndex,
         demoTicks: this.demoTicks,

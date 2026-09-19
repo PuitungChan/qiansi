@@ -33,15 +33,16 @@ export interface DebugPanelState {
 }
 
 const HELP = [
-  '── 操作（设计 §3.2 键鼠） ──',
-  'A / D                  移动',
-  '按住左键拖向目标后松手    牵（拖向空处取消）',
-  '按住左键不动            收丝（设计 §7「按住不放」）',
-  '滚轮上 / 空格 收丝      滚轮下 / Shift  放丝',
-  '右键 / Q / 轻点丝线      断丝',
+  '── 操作（第 13 轮实机反馈后的方案）──',
+  'A / D 或 ← / →           移动（触屏：左下 ◀ ▶）',
+  '按住屏幕空白处瞄准，松手发射（触屏：按住任意空白处）',
+  '  松手点 = 附着点；松手在空白处 = 不附着（画红叉）',
+  '滚轮上 / 空格 收丝  滚轮下 / Shift 放丝（触屏：右下「收」「放」）',
+  'Q / 右键 / 点丝线 断丝（触屏：右下「断」）',
   '',
   '── 调试热键 ──',
-  'R 复位   P 预判线   G 面板   T 慢动作 0.25x',
+  'R 复位   P 预判线   G 面板   L 小字标签   T 慢动作 0.25x',
+  '1 教学  2 遭遇战  3 质量差  4 双丝  5 通关（调试跳段）',
   'N 丝线槽位数（仅 M0）  F1 播放 / F2 停止演示（仅 M0）',
   'M 切换场景：序章（M1） <-> M0 沙盒',
   'J 导出 AC-01 埋点（JSONL）   H 打印最近输入序列',
@@ -69,7 +70,7 @@ export class DebugPanel {
     lines.push('─ 输入（本 tick 实际喂给内核的一帧）─')
     lines.push(
       `moveX ${st.frame.moveX.toFixed(2)}  reel ${st.frame.reel}` +
-        `  attach ${st.frame.attachPressed ? 'Y' : '-'}  cut ${st.frame.cutRope}`,
+        `  fire ${st.frame.firePressed ? 'Y' : '-'}  cut ${st.frame.cutRope}`,
     )
     lines.push(
       `累计断弦 ${st.ropeBreaks}   预判线 ${st.showPrediction ? '开' : '关'}` +

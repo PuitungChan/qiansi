@@ -69,6 +69,9 @@ export const PROLOGUE = {
 /** 三件事都学会之后，墨卒入场前留的一拍（tick）。给玩家一秒钟意识到"我成了"。 */
 const ENCOUNTER_DELAY_TICKS = 60
 
+/** 调试可跳的段落（`cocos/Bootstrap.ts` 的数字键按这个顺序绑定 1..5）。 */
+const SKIP_STAGES: readonly string[] = ['tutorial', 'encounter', 'massdiff', 'dual', 'cleared']
+
 export type PrologueStage =
   /** 0:00–3:00：教牵/收/断，有提示 */
   | 'tutorial'
@@ -442,19 +445,20 @@ export class PrologueScene implements PlayableScene {
   /**
    * 遭遇战结束 → 质量差。
    *
-   * 结束条件是**墨卒被击杀**，或者**到了设计给的两分钟上限**（`ENCOUNTER_MAX_SEC`）。
-   * 后者是为了**不卡死**：一个没打死墨卒的试玩者不该永远停在这一段、看不到后面的内容。
-   * 它**不影响 AC-01 的判定**——`ac01Seconds()` 仍然只认"60 秒内、用石块"。
+   * **出口只有一个：墨卒被击杀。**（第 13 轮反馈：「无需再有时间线，玩家完成上一个操作
+   * 就进入下一个场景」——原先那条 `ENCOUNTER_MAX_SEC = 120` 的到点兜底已删除。）
+   *
+   * 也就是说，一个想不到用石头的玩家会**一直停在 3:00**。这是刻意的：
+   * 这一段正是设计 §7 那句「这是整个游戏最重要的一分钟。玩家必须自己把前三个动作串起来」
+   * ——AC-01 要量的就是"他会不会自己想到"。为了人工检查后面的内容，
+   * 调试面板的跳段键与 `skipTo()` 另有一条路。
    */
   private advanceFromEncounter(): void {
+    if (this.mote.alive) return
     if (this.massDiffCountdown < 0) {
-      const elapsedSec = (this.world.tick - this.encounterStartTick()) / C.TICK_HZ
-      const done = !this.mote.alive || elapsedSec >= C.ENCOUNTER_MAX_SEC
-      if (!done) return
       this.massDiffCountdown = ENCOUNTER_DELAY_TICKS
       return
     }
-
     this.massDiffCountdown--
     if (this.massDiffCountdown > 0) return
 
@@ -469,19 +473,17 @@ export class PrologueScene implements PlayableScene {
   /**
    * 质量差 → 双丝。
    *
-   * 结束条件是**这节课上到了**：玩家把梁柱和轻陶罐**都连过一次**
-   * （亲身体会到"一个把你拉过去、一个被你拉过来"），或者到了设计给的三分钟上限。
-   * 用"两个都摸过"而不是"摸过任意一个"，是因为质量差这个知识点**必须成对才成立**。
+   * 出口：**这节课上到了** —— 玩家把梁柱和轻陶罐**都连过一次**
+   * （亲身体会到"一个把你拉过去、一个被你拉过来"）。原先的三分钟兜底已随
+   * "不要时间线"一起删除。用"两个都摸过"而不是"摸过任意一个"，
+   * 是因为质量差这个知识点**必须成对才成立**。
    */
   private advanceFromMassDiff(): void {
+    if (!(this.touchedBeam && this.touchedPot)) return
     if (this.dualCountdown < 0) {
-      const elapsedSec = this.telemetry.sinceStageSec(this.world.tick, 'massdiff')
-      const learned = this.touchedBeam && this.touchedPot
-      if (!learned && elapsedSec < C.MASSDIFF_MAX_SEC) return
       this.dualCountdown = ENCOUNTER_DELAY_TICKS
       return
     }
-
     this.dualCountdown--
     if (this.dualCountdown > 0) return
 
@@ -492,6 +494,68 @@ export class PrologueScene implements PlayableScene {
     this.mote2.pos = { x: C.MOTE2_SPAWN_X, y: 0.41 }
     this.mote2.vel = { x: 0, y: 0 }
     this.telemetry.markStage(this.world.tick, 'dual')
+  }
+
+  /**
+   * **调试跳段**：直接把场景推进到指定段落，供人工检查后面的内容。
+   *
+   * 为什么需要它：段落出口改成纯进度门控之后，一个卡在 3:00 的人看不到后面两段。
+   * 这个方法是**开发者工具**，不是游戏机制——玩家路径上没有任何东西会调用它
+   * （`cocos/Bootstrap.ts` 的数字键才是入口）。跳段同样会补齐该段应有的前置状态
+   * （陶罐给出、第二根丝解锁、对岸墨卒入场），所以从哪一段开始都能正常玩下去。
+   */
+  skipTo(stage: PrologueStage): void {
+    const order: PrologueStage[] = ['tutorial', 'encounter', 'massdiff', 'dual', 'cleared']
+    if (order.indexOf(stage) < 0) return
+
+    if (stage === 'tutorial') {
+      this.reset()
+      return
+    }
+
+    // 先把前面几段该发生的事一次性补上
+    this.hints.everAttached = true
+    this.hints.everReeled = true
+    this.hints.everCut = true
+    this.encounterCountdown = -1
+    this.massDiffCountdown = -1
+    this.dualCountdown = -1
+
+    // 遭遇战
+    this.stage = 'encounter'
+    this.mote.removed = false
+    this.mote.pos = { x: C.PROLOGUE_MOTE_SPAWN_X, y: 0.41 }
+    this.mote.vel = { x: 0, y: 0 }
+    this.telemetry.startEncounter(this.world.tick)
+
+    if (stage === 'encounter') return
+
+    // 质量差：墨卒算已解决（把"打完"这件事补上）
+    this.mote.hp = 0
+    this.mote.alive = false
+    this.stage = 'massdiff'
+    this.pot.removed = false
+    this.pot.pos = { x: C.POT_SPAWN_X, y: C.POT_RADIUS + 0.01 }
+    this.pot.vel = { x: 0, y: 0 }
+    this.touchedBeam = true
+    this.touchedPot = true
+    this.telemetry.markStage(this.world.tick, 'massdiff')
+
+    if (stage === 'massdiff') return
+
+    // 双丝
+    this.stage = 'dual'
+    this.world.unlockedRopes = Math.min(2, this.world.ropes.length)
+    this.mote2.removed = false
+    this.mote2.pos = { x: C.MOTE2_SPAWN_X, y: 0.41 }
+    this.mote2.vel = { x: 0, y: 0 }
+    this.telemetry.markStage(this.world.tick, 'dual')
+
+    if (stage === 'dual') return
+
+    // 已通关：直接站在对岸平台上
+    this.player.pos = { x: C.CHASM_RIGHT_X + 2, y: C.PLAYER_HALF_H + 0.01 }
+    this.player.vel = { x: 0, y: 0 }
   }
 
   /**
@@ -633,6 +697,16 @@ export class PrologueScene implements PlayableScene {
   /** 是否已通关（穿过深沟，D-041）。 */
   get cleared(): boolean {
     return this.stage === 'cleared'
+  }
+
+  /** 调试跳段：可跳的段落名（见 `skipTo`）。 */
+  debugStages(): readonly string[] {
+    return SKIP_STAGES
+  }
+
+  debugSkip(name: string): void {
+    const s = SKIP_STAGES.find((x) => x === name)
+    if (s !== undefined) this.skipTo(s as PrologueStage)
   }
 
   /** 教学进度（调试面板与埋点用）。 */

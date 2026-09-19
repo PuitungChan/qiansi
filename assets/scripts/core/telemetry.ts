@@ -33,6 +33,8 @@ export type TelemetryKind =
   | 'pos'
   /** 牵上丝线（累计次数同时记在 `attachCount`） */
   | 'attach'
+  /** 松手射丝，但落点是空白（没附着上）。用来复盘"玩家瞄不准"还是"没东西可勾" */
+  | 'rope_miss'
   /** 玩家主动断丝 */
   | 'cut'
   /** 超限断丝（D-032 后不该再出现，留着当哨兵） */
@@ -115,10 +117,6 @@ export class Telemetry {
 
     for (const e of world.events) this.fromSimEvent(tick, world, e)
 
-    if (input.attachPressed) {
-      // 真实"牵上了"由 rope-attached 事件确认；这里不记，避免把拖空也算一次
-    }
-
     // 周期位置采样
     if (tick - this.lastPosSample >= POS_SAMPLE_TICKS) {
       this.lastPosSample = tick
@@ -133,6 +131,13 @@ export class Telemetry {
 
   private fromSimEvent(tick: number, world: World, e: SimEvent): void {
     switch (e.kind) {
+      case 'rope-launched':
+        // 射出去 ≠ 连上了。埋点只记**到位**（rope-attached），
+        // 否则"松手射了一次但没连上"会被算成一次成功的操作。
+        break
+      case 'rope-missed':
+        this.push(tick, 'rope_miss', { rope: e.rope })
+        break
       case 'rope-attached': {
         this.attachCount++
         const target = world.bodyById(e.target)

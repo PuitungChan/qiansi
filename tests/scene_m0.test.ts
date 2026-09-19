@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { input } from '../assets/scripts/core/input'
 import { M0Scenario } from '../assets/scripts/core/scene_m0'
+import { fire } from './helpers'
 import {
   ARMOR_PATROL_MAX_X,
   ARMOR_PATROL_MIN_X,
@@ -56,7 +57,7 @@ test('开局主角已着地、石块已落稳（不能一进游戏就在抖）',
 
 test('纯收丝不会把丝绷断（D-032：张力到顶改为变刚性）', () => {
   const sc = new M0Scenario()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
 
   let peakTension = 0
   let maxSpeed = 0
@@ -78,7 +79,7 @@ test('纯收丝不会把丝绷断（D-032：张力到顶改为变刚性）', () 
 
 test('甩动 + 奔跑能把石块加速到设计中"投石"所需的量级（≥ 15 m/s）', () => {
   const sc = new M0Scenario()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   // 一边左右摆动一边持续收丝。这是"要在摆动中收丝"的教学点：
   // 单纯把石块拖到脚边（只收丝不摆动）拿不到速度——没有角动量就没有 v ∝ 1/r。
   let maxSpeed = 0
@@ -95,7 +96,7 @@ test('甩动 + 奔跑能把石块加速到设计中"投石"所需的量级（≥
 
 test('断丝不附加额外冲量（FR-PHY-012 的"抖腕"是 R2，R1 不该先做掉）', () => {
   const sc = new M0Scenario()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   for (let i = 0; i < 30; i++) sc.step(input({ reel: 'in' }))
 
   let before = 0

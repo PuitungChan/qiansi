@@ -36,6 +36,11 @@ import { type Vec2, dist, sub } from './vec2'
 export type RopeState =
   /** 空闲：可以附着。 */
   | 'idle'
+  /**
+   * 飞行中：丝已经从主角射出去，**还没到位**（第 13 轮反馈新增）。
+   * 这一段时间里它**不传递任何力**，只是视觉上从主角射向目标。
+   */
+  | 'flying'
   /** 已附着：正在传递张力。 */
   | 'attached'
   /** 重凝中：断开后的 1.5s 冷却，不可附着（FR-PHY-007）。 */
@@ -45,8 +50,23 @@ export interface Rope {
   /** 稳定索引（0..MAX_ROPE-1），同时充当 HUD 上的丝线圆点顺序（FR-UI-001）。 */
   readonly index: number
   state: RopeState
-  /** 被附着刚体的 id；`-1` = 未附着。 */
+  /** 被附着（或正飞向）的刚体 id；`-1` = 无目标。 */
   targetId: number
+  /**
+   * **附着点在目标上的局部偏移**（米，相对目标中心）。
+   *
+   * 第 13 轮反馈：「现在丝线无论发射到物体的哪个位置，最终呈现出来都是附着在了物体的中间，
+   * 我觉得这个不太好，有时候我可能想把丝线射到横梁的边上。」
+   *
+   * 所以锚点不再是"离主角最近的表面点"（那正是 D-048 的做法，它会随主角移动而**滑动**），
+   * 而是**发射那一刻锁定的那一点**，之后跟着目标刚体一起走。
+   * 副作用是好的：横梁不再是一根"可以吊着人横向滑动的轨道"（见 D-049 的漏洞）。
+   */
+  anchorOffset: Vec2
+  /** 飞行中的**丝头**世界坐标（表现层画这条线用）。 */
+  flyTip: Vec2
+  /** 飞行起点（主角出丝点），表现层用。 */
+  flyFrom: Vec2
   /** 玩家控制的目标丝长（米）。收/放丝改的就是它。 */
   targetLength: number
   /** 当前实际长度（诊断 + 表现用）。 */
@@ -66,6 +86,9 @@ export function createRope(index: number): Rope {
     index,
     state: 'idle',
     targetId: -1,
+    anchorOffset: { x: 0, y: 0 },
+    flyTip: { x: 0, y: 0 },
+    flyFrom: { x: 0, y: 0 },
     targetLength: 0,
     length: 0,
     tension: 0,

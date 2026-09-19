@@ -28,7 +28,7 @@ import { M0Scenario } from '../assets/scripts/core/scene_m0'
  * - `87798a76fdf50d33` 批 1 起：`removed`（碎裂标记）进入状态哈希
  * - `a6b7857ff68efb22` 批 4 起：`unlockedRopes`（丝位解锁进度）进入状态哈希
  */
-const EXPECTED_HASH = 'a6b7857ff68efb22'
+const EXPECTED_HASH = 'c2856b1b7c876a42'
 
 test('演示脚本长度固定且不含任何随机性', () => {
   const a = demoScript()

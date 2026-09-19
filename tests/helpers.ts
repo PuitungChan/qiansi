@@ -5,16 +5,65 @@
 
 import { type Body, aabb, circle } from '../assets/scripts/core/body'
 import * as C from '../assets/scripts/core/constants'
-import type { InputFrame } from '../assets/scripts/core/input'
+import { type InputFrame, input } from '../assets/scripts/core/input'
 import { World, type WorldConfig } from '../assets/scripts/core/world'
 
 export const NO_INPUT: InputFrame = {
   moveX: 0,
   aimPoint: null,
-  attachPressed: false,
+  firePressed: false,
   reel: 'hold',
   cutRope: -1,
   focus: false,
+}
+
+/** 能"发射一根丝"的最小宿主：场景与世界都满足。 */
+export interface FireHost {
+  step(i: InputFrame): void
+  readonly world: World
+}
+
+/**
+ * **松手发射，并推进到丝线真的连上**。
+ *
+ * 第 13 轮起丝线不再瞬间成形：它要从主角**飞**到目标（`ROPE_LAUNCH_SPEED = 40 m/s`），
+ * 到位那一刻才转 `attached`。所以"瞄准→发射"在测试里必须多推几帧，
+ * 否则断言看到的是飞行中的 `flying` 状态。
+ *
+ * 最多等 `MAX_FLIGHT_TICKS`（12m 上限 / 40 m/s = 18 帧，留足余量）。
+ * 返回是否连上了——不连上也可能是**预期**（松手在空白处 ⇒ 不附着）。
+ */
+export function fire(host: FireHost, point: { x: number; y: number }): boolean {
+  const before = attachedCount(host.world)
+  host.step(input({ aimPoint: point, firePressed: true }))
+  for (let i = 0; i < MAX_FLIGHT_TICKS; i++) {
+    if (attachedCount(host.world) > before) return true
+    host.step(NO_INPUT)
+  }
+  return attachedCount(host.world) > before
+}
+
+const MAX_FLIGHT_TICKS = 40
+
+/**
+ * **只把丝射出去，不推进**。
+ *
+ * 用于断言"飞行中 / 冷却中"这类**中间状态**——`fire()` 会一路推到连上为止，
+ * 那会把中间状态跳过去（用它检查"冷却期内不该连上"时，等到的是冷却结束）。
+ */
+export function fireNoWait(host: FireHost, point: { x: number; y: number }): void {
+  host.step(input({ aimPoint: point, firePressed: true }))
+}
+
+/** 把一个裸 `World` 包成 `fire()` 能用的宿主（`World` 自己没有 `world` 字段）。 */
+export function rawHost(world: World): FireHost {
+  return { step: (i) => world.step(i), world }
+}
+
+function attachedCount(world: World): number {
+  let n = 0
+  for (const r of world.ropes) if (r.state === 'attached') n++
+  return n
 }
 
 /** 无地面的纯空世界（只测绳索与物体动力学时用）。 */

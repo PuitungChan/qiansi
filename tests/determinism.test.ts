@@ -38,13 +38,13 @@ function script(ticks: number, seed: number): InputFrame[] {
     const moveX = r < 0.3 ? -1 : r < 0.6 ? 1 : 0
     const reel = r < 0.45 ? 'in' : r < 0.7 ? 'out' : 'hold'
     // 第 10 tick 固定发起一次牵丝（瞄准石块初始位置附近）
-    const attachPressed = i === 10
-    const aimPoint = attachPressed ? { x: 8, y: 0.5 } : null
+    const firePressed = i === 10
+    const aimPoint = firePressed ? { x: 8, y: 0.5 } : null
     // 每 137 tick 断一次丝
     const cutRope = attached && i % 137 === 0 ? 0 : -1
-    if (attachPressed) attached = true
+    if (firePressed) attached = true
     if (cutRope >= 0) attached = false
-    frames.push(input({ moveX, reel, attachPressed, aimPoint, cutRope }))
+    frames.push(input({ moveX, reel, firePressed, aimPoint, cutRope }))
   }
   return frames
 }
@@ -112,7 +112,7 @@ test('回放序列化可往返、且不含时间戳等非确定信息', () => {
   const f = input({
     moveX: 0.5,
     aimPoint: { x: 1.23456789, y: -0.0000004 },
-    attachPressed: true,
+    firePressed: true,
     reel: 'in',
     cutRope: 2,
     focus: true,

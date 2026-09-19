@@ -4,15 +4,31 @@
  * 这一层唯一的职责是把引擎的键鼠/触摸事件**翻译成内核的 `InputFrame`**（每 tick 一帧）。
  * 内核不读键盘，也不读鼠标——那会直接摧毁 AC-05 的确定性（见 input.ts 的文件头）。
  *
- * 映射依据：
- *   - 键鼠：设计 §3.2 / FR-ACT-005 —— WASD 移动 · 拖拽牵丝 · 滚轮或空格/Shift 收放 · 点击丝线或 Q 断
- *   - 触屏：设计 §3.1 / FR-ACT-001~004 —— 左半屏摇杆 · 右半屏拖拽牵丝 · 按住收丝 · 点击丝线断开
+ * ## 第 13 轮实机反馈后的操作方案（**整层重写**）
  *
- * 两处交互冲突及解法（这是 M0 需要你实机确认的手感点）：
- *   1. **左键既是"拖拽牵丝"又是"点击断丝"** —— 用位移阈值区分：
- *      按下到松开位移 < `CLICK_SLOP_PX` 视为点击（尝试断丝），否则视为拖拽（尝试牵丝）。
- *   2. **触屏右半屏"按住"既是收丝又是点击断丝** —— 用时间阈值区分：
- *      按住超过 `HOLD_MS` 且未移动视为收丝，提前松手视为点击。
+ * 创始人三条原话：
+ *   1. 「左半屏幕负责移动……有时候丝线需要连到左半屏幕的部分，操作起来很不方便，
+ *      既然移动方向只有左右，那就使用左右两个按键进行移动就好，没有必要虚拟摇杆占据半个屏幕」
+ *   2. 「在角色运动中点击丝线来切断这个方式依旧很不灵敏，是否能改为通过按键切断？」
+ *   3. 「是否可以做成玩家长按屏幕瞄准，松手后发射丝线，松手的位置即是丝线附着的位置
+ *      （如果松手的地方是空白那么不附着）」
+ *
+ * 于是：
+ *
+ * | 操作 | 触屏 | 键鼠 |
+ * |---|---|---|
+ * | 移动 | 左下 ◀ ▶ | `A`/`D` 或 `←`/`→` |
+ * | 瞄准 | **按住屏幕任意空白处**（整屏都是瞄准区） | 按住鼠标左键 |
+ * | 发射 | 松手 | 松开左键 |
+ * | 收丝 / 放丝 | 右下「收」「放」 | 滚轮上 / 下（空格 / Shift 亦可） |
+ * | 切断 | 右下「断」 | `Q` / 右键（**轻点丝线**作为备选保留） |
+ *
+ * 「轻点丝线 = 断」与「松手 = 发射」会打架，用**时长**分开：
+ * 按下到松手 < `TAP_CUT_MS` 且松手点落在某根已附着的丝上 ⇒ 断那一根；
+ * 否则就是一次发射（松手在空白处 ⇒ 内核不附着）。
+ *
+ * **按钮几何来自 `core/hud.ts` 的同一份数据**——渲染层画的就是输入层命中的矩形，
+ * 两处不可能错位（见 hud.ts 的文件头）。
  *
  * 本文件认识 `cc`，但**不修改任何物理量**。
  */
@@ -28,67 +44,68 @@ import {
 } from 'cc'
 import { type InputFrame, type ReelCommand, input as makeFrame, sanitizeMoveX } from '../core/input'
 import type { PlayableScene } from '../core/playable'
-import { VIEW_W, DT } from '../core/constants'
+import { buttonAt, type HudButtonId } from '../core/hud'
+import { DT } from '../core/constants'
 import { uiToWorld } from './Coordinates'
 
-/** 点击 / 拖拽的位移阈值（逻辑像素）。 */
-const CLICK_SLOP_PX = 8
-/** 触屏"按住收丝"的判定时长（毫秒）。 */
-const HOLD_MS = 220
 /** 滚轮一格等效持续收放的 tick 数。 */
 const WHEEL_PULSE_TICKS = 6
-/** 触屏左半屏虚拟摇杆的满偏半径（逻辑像素）。 */
-const STICK_RADIUS_PX = 110
+/** 短按多久之内算"轻点"（毫秒）：轻点丝线 = 断，其余松手 = 发射。 */
+const TAP_CUT_MS = 200
 
 interface PointerState {
   down: boolean
-  /** 按下时的 UI 坐标 */
-  startX: number
-  startY: number
-  /** 当前 UI 坐标 */
   x: number
   y: number
   /** 按下时刻（毫秒） */
   downAt: number
-  /** 是否已越过点击阈值 */
-  dragged: boolean
 }
 
 function emptyPointer(): PointerState {
-  return { down: false, startX: 0, startY: 0, x: 0, y: 0, downAt: 0, dragged: false }
+  return { down: false, x: 0, y: 0, downAt: 0 }
+}
+
+/** 松手后待处理的一次"轻点/发射"。由 `sample()` 决定它是断丝还是发射。 */
+interface PendingRelease {
+  x: number
+  y: number
+  heldMs: number
 }
 
 export class PlayerInput {
   private readonly keys = new Set<number>()
-  private readonly mouse = emptyPointer()
-  private readonly touch = emptyPointer()
 
-  /** 本 tick 待消费的一次性事件 */
-  private pendingAttach: CcVec2 | null = null
-  private pendingCutPoint: CcVec2 | null = null
-  /**
-   * 右键 = 断丝（就近）。
-   * `qWasDown` 用于 Q 键的边沿检测——否则按住 Q 会每个 tick 都断一次。
-   */
+  /** 屏幕按钮的按下状态（触屏与鼠标共用）。 */
+  private readonly buttons = new Set<HudButtonId>()
+
+  /** 瞄准指针（鼠标或触摸，二选一，见 `activePointer`）。 */
+  private readonly aim = emptyPointer()
+
+  /** 松手那一帧留下的记录。 */
+  private pendingRelease: PendingRelease | null = null
+  /** 右键 = 断最近一根。 */
   private pendingCutNearest = false
+
+  /** 边沿检测：按住不该每 tick 都断一次。 */
   private qWasDown = false
+  private cutButtonWasDown = false
+  /** 鼠标正按着哪个按钮（松开时要清掉，且不能只清一个）。 */
+  private mouseButton: HudButtonId | null = null
+
   private reelPulse = 0
   private reelPulseDir: ReelCommand = 'hold'
 
   /**
    * 指针来源仲裁：**谁先按下谁独占**，另一来源在这次按下期间的事件全部忽略。
-   * 用于消除"鼠标与触摸同时派发"导致的重复处理（见触屏一节的说明）。
+   * 用于消除"鼠标与触摸同时派发"导致的重复处理（第 4 轮实机反馈 #1 的根因之一）。
    */
   private activePointer: 'none' | 'mouse' | 'touch' = 'none'
-  /** 触摸 id：左半屏摇杆 / 右半屏瞄准各跟踪一根手指，不再靠坐标判断归属。 */
-  private joystickId: number | null = null
+  /** 触摸 id：瞄准手指 / 按钮手指分开跟踪，不再靠坐标判断归属。 */
   private aimTouchId: number | null = null
+  private readonly buttonTouches = new Map<number, HudButtonId>()
 
-  /** 最近一次指针所在的世界坐标（画瞄准线用）。 */
+  /** 最近一次瞄准点的世界坐标（渲染层画瞄准线与附着点标记）。 */
   aimWorld: { x: number; y: number } | null = null
-
-  /** 是否处于"拖拽瞄准"状态。 */
-  private aiming = false
 
   constructor() {
     this.bind()
@@ -132,7 +149,7 @@ export class PlayerInput {
     this.keys.delete(e.keyCode)
   }
 
-  /** 调试热键（R 复位等）由 Bootstrap 直接查询，不走 InputFrame。 */
+  /** 调试热键（复位、跳段等）由 Bootstrap 直接查询，不走 InputFrame。 */
   isKeyDown(code: KeyCode): boolean {
     return this.keys.has(code)
   }
@@ -150,219 +167,204 @@ export class PlayerInput {
     if (this.activePointer === 'touch') return
 
     const button = e.getButton()
-
-    // 右键 = 断丝（就近一根）。这是第 3 轮实机反馈后的**主手段**：
-    // 「点击丝线太需要精细度」——需求只规定了点击这一条路（FR-ACT-004），
-    // 但没规定不能用右键；保留点击作为备选，同时给一条不依赖精度的路。
     if (button === EventMouse.BUTTON_RIGHT) {
       this.pendingCutNearest = true
       return
     }
-
     if (button !== EventMouse.BUTTON_LEFT) return
+
     this.activePointer = 'mouse'
     const loc = e.getUILocation()
-    const p = this.mouse
-    p.down = true
-    p.startX = loc.x
-    p.startY = loc.y
-    p.x = loc.x
-    p.y = loc.y
-    p.downAt = nowMs()
-    p.dragged = false
+
+    // 落点在屏幕按钮上 ⇒ 这是"按按钮"，不是瞄准
+    const hit = buttonAt(loc.x, loc.y)
+    if (hit !== null) {
+      this.mouseButton = hit.id
+      this.buttons.add(hit.id)
+      return
+    }
+
+    this.beginAim(loc.x, loc.y)
   }
 
   private onMouseMove(e: EventMouse): void {
-    // 触摸正独占 ⇒ 忽略鼠标移动，别去改写触摸维护的指针状态
     if (this.activePointer === 'touch') return
     const loc = e.getUILocation()
-    const p = this.mouse
-    p.x = loc.x
-    p.y = loc.y
-    if (p.down && !p.dragged) {
-      if (Math.hypot(p.x - p.startX, p.y - p.startY) > CLICK_SLOP_PX) p.dragged = true
+
+    // 鼠标按住按钮后移出 ⇒ 松开（与触屏一致，避免"看着没按却一直在收丝"）
+    if (this.mouseButton !== null) {
+      const hit = buttonAt(loc.x, loc.y)
+      if (hit === null || hit.id !== this.mouseButton) {
+        this.buttons.delete(this.mouseButton)
+        this.mouseButton = null
+      }
+      return
     }
+
+    if (!this.aim.down) return
+    this.aim.x = loc.x
+    this.aim.y = loc.y
+    // **按住不动也算瞄准**（松手就是发射）。第 13 轮之前"按住不动 = 收丝"，
+    // 现在收丝有自己的按钮与滚轮，所以长按就是瞄准。
     this.aimWorld = uiToWorld(loc.x, loc.y)
-    this.aiming = p.down && p.dragged
   }
 
   private onMouseUp(e: EventMouse): void {
     if (e.getButton() !== EventMouse.BUTTON_LEFT) return
-    const p = this.mouse
-    if (!p.down) return
     const loc = e.getUILocation()
-    p.down = false
-    if (this.activePointer === 'mouse') this.activePointer = 'none'
-    const heldMs = nowMs() - p.downAt
-    if (p.dragged) {
-      // 拖拽松手 = 牵（FR-ACT-005）
-      this.pendingAttach = new CcVec2(loc.x, loc.y)
-    } else if (heldMs >= HOLD_MS) {
-      // 按住不动 = 收丝（设计 §7「按住不放」）。收丝在按住期间已经逐 tick 生效，
-      // 松手时不需要再做任何事。
-    } else {
-      // 轻点（< 180ms 且没移动）= 尝试断丝（FR-ACT-004「丝线即按钮」）
-      this.pendingCutPoint = new CcVec2(loc.x, loc.y)
+
+    if (this.mouseButton !== null) {
+      this.buttons.delete(this.mouseButton)
+      this.mouseButton = null
+      if (this.activePointer === 'mouse') this.activePointer = 'none'
+      return
     }
-    this.aiming = false
+    if (!this.aim.down) return
+
+    this.aim.down = false
+    this.aimWorld = uiToWorld(loc.x, loc.y)
+    this.pendingRelease = { x: loc.x, y: loc.y, heldMs: nowMs() - this.aim.downAt }
+    if (this.activePointer === 'mouse') this.activePointer = 'none'
   }
 
   private onMouseWheel(e: EventMouse): void {
     const dy = e.getScrollY()
     if (dy === 0) return
-    // 滚轮上 = 收丝，下 = 放丝（设计 §3.2）
+    // 滚轮上 = 收丝，下 = 放丝（创始人第 13 轮指定的键鼠收放方式）
     this.reelPulseDir = dy > 0 ? 'in' : 'out'
     this.reelPulse = WHEEL_PULSE_TICKS
   }
 
   // ── 触屏 ────────────────────────────────────────────
-  //
-  // ⚠️ 第 4 轮实机反馈 #1「按住左键瞄准时人物自己滑了」的根因就在这一段。
-  //
-  // 两个缺陷叠加：
-  //   ① 摇杆状态会**卡死**：`onTouchEnd` 原先按"抬起点在哪一半屏"来分支，
-  //      手指从左半屏划到右半屏再抬起时，走的是右半屏分支，`touch.down` 永远留在 true。
-  //      之后 `sample()` 每 tick 都按摇杆偏移算 moveX ⇒ **主角自己一直滑**。
-  //   ② 鼠标与触摸可能**同时到达**：一旦平台同时派发两套事件，左半屏按住左键拖拽
-  //      就既在"瞄准"又在"推摇杆"，于是"瞄准时人被拉/滑走"。
-  //
-  // 修法：用**指针来源仲裁**（谁先按下谁独占，另一个来源的事件在此次按下期间全部忽略）
-  // + 用**触摸 id** 跟踪两根手指，不再靠"当前坐标在哪一半屏"来判断归属。
 
   private onTouchStart(e: EventTouch): void {
-    // 独占仲裁：鼠标已经按着的时候，忽略触摸（视为同一次输入的重复派发）
     if (this.activePointer === 'mouse') return
     this.activePointer = 'touch'
 
     const loc = e.getUILocation()
     const id = e.getID()
-    if (loc.x < VIEW_W / 2) {
-      if (this.joystickId !== null) return // 摇杆已被另一根手指占用
-      this.joystickId = id
-      const t = this.touch
-      t.down = true
-      t.startX = loc.x
-      t.startY = loc.y
-      t.x = loc.x
-      t.y = loc.y
-      t.downAt = nowMs()
-      t.dragged = false
+
+    // 按钮优先：落在按钮上就只当按钮，绝不同时开始瞄准
+    const hit = buttonAt(loc.x, loc.y)
+    if (hit !== null) {
+      if (this.buttonTouches.has(id)) return
+      this.buttonTouches.set(id, hit.id)
+      this.buttons.add(hit.id)
       return
     }
+
+    // 其余整个屏幕都是瞄准区（这正是"取消左半屏摇杆"换来的东西）
     if (this.aimTouchId !== null) return
     this.aimTouchId = id
-    const p = this.mouse
-    p.down = true
-    p.startX = loc.x
-    p.startY = loc.y
-    p.x = loc.x
-    p.y = loc.y
-    p.downAt = nowMs()
-    p.dragged = false
-    this.aimWorld = uiToWorld(loc.x, loc.y)
+    this.beginAim(loc.x, loc.y)
   }
 
   private onTouchMove(e: EventTouch): void {
     const id = e.getID()
     const loc = e.getUILocation()
 
-    if (id === this.joystickId) {
-      this.touch.x = loc.x
-      this.touch.y = loc.y
-      this.touch.dragged = true
+    // 手指滑出按钮 ⇒ 松开那个按钮
+    const held = this.buttonTouches.get(id)
+    if (held !== undefined) {
+      const hit = buttonAt(loc.x, loc.y)
+      if (hit === null || hit.id !== held) {
+        this.buttons.delete(held)
+        this.buttonTouches.delete(id)
+      }
       return
     }
-    if (id !== this.aimTouchId) return
 
-    const p = this.mouse
-    p.x = loc.x
-    p.y = loc.y
-    if (p.down && Math.hypot(p.x - p.startX, p.y - p.startY) > CLICK_SLOP_PX) {
-      p.dragged = true
-      this.aimWorld = uiToWorld(loc.x, loc.y)
-      this.aiming = true
-    }
+    if (id !== this.aimTouchId) return
+    this.aim.x = loc.x
+    this.aim.y = loc.y
+    this.aimWorld = uiToWorld(loc.x, loc.y)
   }
 
   private onTouchEnd(e: EventTouch): void {
     const id = e.getID()
     const loc = e.getUILocation()
 
-    if (id === this.joystickId) {
-      // 关键修复：无论手指在哪里抬起，摇杆状态都必须清掉
-      this.joystickId = null
-      this.touch.down = false
-      if (this.aimTouchId === null) this.activePointer = 'none'
+    const held = this.buttonTouches.get(id)
+    if (held !== undefined) {
+      this.buttonTouches.delete(id)
+      this.buttons.delete(held)
+      if (this.aimTouchId === null && this.buttonTouches.size === 0) this.activePointer = 'none'
       return
     }
+
     if (id !== this.aimTouchId) return
-
     this.aimTouchId = null
-    if (this.activePointer === 'touch' && this.joystickId === null) {
-      this.activePointer = 'none'
-    }
+    if (this.buttonTouches.size === 0) this.activePointer = 'none'
 
-    const p = this.mouse
-    p.down = false
-    this.aiming = false
-    const heldMs = nowMs() - p.downAt
-    if (p.dragged) {
-      this.pendingAttach = new CcVec2(loc.x, loc.y)
-    } else if (heldMs >= HOLD_MS) {
-      // 按住不放 = 收丝（设计 §3.1）
-      this.reelPulseDir = 'in'
-      this.reelPulse = 2
-    } else {
-      this.pendingCutPoint = new CcVec2(loc.x, loc.y)
-    }
+    this.aim.down = false
+    this.aimWorld = uiToWorld(loc.x, loc.y)
+    this.pendingRelease = { x: loc.x, y: loc.y, heldMs: nowMs() - this.aim.downAt }
+  }
+
+  private beginAim(x: number, y: number): void {
+    this.aim.down = true
+    this.aim.x = x
+    this.aim.y = y
+    this.aim.downAt = nowMs()
+    this.aimWorld = uiToWorld(x, y)
   }
 
   // ── 采样 ────────────────────────────────────────────
 
   /**
-   * 产出一帧输入。**每个物理 tick 调用一次**，所以在一次渲染帧里连续跑多个
-   * 固定步时，只有第一步会携带一次性事件（牵/断），这正是我们要的确定性语义。
+   * 产出一帧输入。**每个物理 tick 调用一次**，所以一次渲染帧里连续跑多个固定步时，
+   * 只有第一步会携带一次性事件（发射/断丝），这正是我们要的确定性语义。
    */
   sample(sc: PlayableScene): InputFrame {
+    // 移动：按钮 + 键盘，按钮优先（同向不叠加，避免意外加速）
     let moveX = this.moveXFromKeys()
-    if (this.touch.down) {
-      const dx = this.touch.x - this.touch.startX
-      moveX = sanitizeMoveX(dx / STICK_RADIUS_PX)
-    }
+    if (this.buttons.has('left')) moveX = -1
+    else if (this.buttons.has('right')) moveX = 1
 
-    let attachPressed = false
-    let attachPoint: { x: number; y: number } | null = null
-    if (this.pendingAttach !== null) {
-      attachPoint = uiToWorld(this.pendingAttach.x, this.pendingAttach.y)
-      attachPressed = true
-      this.pendingAttach = null
-    }
-
+    // ── 断（优先级：按钮 > 右键 > 轻点丝线 > Q）──
+    // 按钮与 Q 都做**边沿检测**：按住不该每 tick 断一根。
     let cutRope = -1
-    // 优先级：右键（就近） > 轻点丝线 > Q 键（就近）
-    if (this.pendingCutNearest) {
+    const cutDown = this.buttons.has('cut')
+    if (cutDown && !this.cutButtonWasDown) {
       cutRope = sc.world.pickNearestRope(sc.player.pos)
-      this.pendingCutNearest = false
-    } else if (this.pendingCutPoint !== null) {
-      const p = uiToWorld(this.pendingCutPoint.x, this.pendingCutPoint.y)
-      cutRope = sc.world.pickRope(p)
-      this.pendingCutPoint = null
-    } else {
-      const qDown = this.keys.has(KeyCode.KEY_Q)
-      if (qDown && !this.qWasDown) cutRope = sc.world.pickNearestRope(sc.player.pos)
-      this.qWasDown = qDown
+    }
+    this.cutButtonWasDown = cutDown
+
+    if (cutRope < 0 && this.pendingCutNearest) {
+      cutRope = sc.world.pickNearestRope(sc.player.pos)
+    }
+    this.pendingCutNearest = false
+
+    const qDown = this.keys.has(KeyCode.KEY_Q)
+    if (cutRope < 0 && qDown && !this.qWasDown) {
+      cutRope = sc.world.pickNearestRope(sc.player.pos)
+    }
+    this.qWasDown = qDown
+
+    // ── 松手：轻点丝线 = 断；否则 = 发射 ──
+    let aimPoint: { x: number; y: number } | null = null
+    let firePressed = false
+    if (this.pendingRelease !== null) {
+      const rel = this.pendingRelease
+      this.pendingRelease = null
+      const p = uiToWorld(rel.x, rel.y)
+      const rope = rel.heldMs < TAP_CUT_MS ? sc.world.pickRope(p) : -1
+      if (rope >= 0 && cutRope < 0) {
+        cutRope = rope
+      } else {
+        aimPoint = p
+        firePressed = true
+      }
+    } else if (this.aim.down) {
+      aimPoint = uiToWorld(this.aim.x, this.aim.y)
     }
 
+    // ── 收 / 放 ──
     let reel: ReelCommand = 'hold'
-    if (this.keys.has(KeyCode.SPACE)) reel = 'in'
+    if (this.buttons.has('reelIn')) reel = 'in'
+    else if (this.buttons.has('reelOut')) reel = 'out'
+    else if (this.keys.has(KeyCode.SPACE)) reel = 'in'
     else if (this.keys.has(KeyCode.SHIFT_LEFT) || this.keys.has(KeyCode.SHIFT_RIGHT)) reel = 'out'
-
-    // 按住左键不动 = 收丝（设计 §7「按住不放」）。
-    // 与"轻点断丝"用时间阈值分开：< 180ms 是点击，≥ 180ms 是按住。
-    if (reel === 'hold' && this.mouse.down && !this.mouse.dragged) {
-      if (nowMs() - this.mouse.downAt >= HOLD_MS) reel = 'in'
-    }
-
     if (this.reelPulse > 0) {
       reel = this.reelPulseDir
       this.reelPulse--
@@ -370,17 +372,22 @@ export class PlayerInput {
 
     return makeFrame({
       moveX,
-      aimPoint: attachPoint,
-      attachPressed,
+      aimPoint,
+      firePressed,
       reel,
       cutRope,
       focus: this.keys.has(KeyCode.KEY_F),
     })
   }
 
-  /** 是否有可用的瞄准点（渲染层用来画瞄准线）。 */
+  /** 是否正按着瞄准（渲染层据此画瞄准线与附着点标记）。 */
   get isAiming(): boolean {
-    return this.aiming
+    return this.aim.down
+  }
+
+  /** 哪个按钮正被按下（渲染层据此画按下高亮）。 */
+  isButtonDown(id: HudButtonId): boolean {
+    return this.buttons.has(id)
   }
 
   /** 单次固定步之间的收放脉冲衰减由 sample() 负责，这里只暴露 DT 供调用方参考。 */

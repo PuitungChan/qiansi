@@ -12,9 +12,25 @@ import type { DamageType } from './damage'
 import type { Vec2 } from './vec2'
 
 export type SimEvent =
-  /** 丝线成功附着到目标。 */
+  /**
+   * 丝线**射出去**了（第 13 轮反馈新增）：锁定目标与附着点，开始飞行。
+   * 飞行期间不传力；到位时才发 `rope-attached`。
+   */
+  | {
+      readonly kind: 'rope-launched'
+      readonly rope: number
+      readonly target: number
+      /** 附着点（世界坐标，已经吸附到目标表面）。 */
+      readonly at: Vec2
+    }
+  /**
+   * 松手点在空白处 ⇒ **没有附着**（创始人明确的规则）。
+   * 它不是"失败"，只是"这儿没东西可勾"；渲染层可以据此给一帧反馈。
+   */
+  | { readonly kind: 'rope-missed'; readonly rope: number; readonly at: Vec2 }
+  /** 丝线成功附着到目标（= 飞行到位）。 */
   | { readonly kind: 'rope-attached'; readonly rope: number; readonly target: number }
-  /** 玩家主动断开（点击丝线 / Q）。无硬直，但丝位进入 1.5s 重凝。 */
+  /** 玩家主动断开（屏幕「断」按钮 / `Q` / 右键 / 点丝线）。无硬直，但丝位进入 1.5s 重凝。 */
   | { readonly kind: 'rope-cut'; readonly rope: number; readonly target: number }
   /** 张力超限断裂。附加 0.8s 硬直。 */
   | {

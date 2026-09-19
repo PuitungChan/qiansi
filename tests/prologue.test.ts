@@ -14,7 +14,7 @@ import { createHintState, hintStep, hintText } from '../assets/scripts/core/hint
 import { input } from '../assets/scripts/core/input'
 import { PROLOGUE, PrologueScene } from '../assets/scripts/core/scene_prologue'
 import { TEXTS, totalTextLength } from '../assets/scripts/core/texts'
-import { NO_INPUT } from './helpers'
+import { NO_INPUT, fire } from './helpers'
 
 test('序章刚开局只包含设计 §7 那几样东西', () => {
   const sc = new PrologueScene()
@@ -96,7 +96,7 @@ test('提示推进由真实操作驱动（连上 → 收丝 → 断丝）', () =
   assert.equal(sc.hint(), TEXTS.hintAttach)
 
   // 牵上石块
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   assert.equal(sc.hint(), TEXTS.hintReel)
 
   // 收丝
@@ -141,7 +141,7 @@ test('碎裂的陶罐不再参与碰撞', () => {
 test('序章 reset() 回到可复现的初态（含提示进度）', () => {
   const sc = new PrologueScene()
   const h0 = sc.world.stateHash()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   sc.step(input({ reel: 'in' }))
   assert.notEqual(sc.hint(), TEXTS.hintAttach)
 
@@ -155,7 +155,7 @@ test('序章 reset() 回到可复现的初态（含提示进度）', () => {
 test('序章批 1 也是确定性的（同一输入序列 → 同一哈希）', () => {
   const play = (): string => {
     const sc = new PrologueScene()
-    sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+    fire(sc, sc.stone.pos)
     for (let i = 0; i < 120; i++) {
       sc.step(input({ moveX: Math.floor(i / 30) % 2 === 0 ? 1 : -1, reel: 'in' }))
     }
@@ -180,7 +180,7 @@ test('NFR-I18N-003：玩家可见文案全部走资源表，且总量远低于 5
 
 test('断丝重凝在序章同样生效（AC-21 不因换场景而失效）', () => {
   const sc = new PrologueScene()
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   sc.step(input({ cutRope: 0 }))
   assert.equal(sc.world.ropes[0]!.state, 'recovering')
   assert.ok(Math.abs(sc.world.ropes[0]!.recongealRemaining - ROPE_RECONGEAL_SEC) < 1e-6)
@@ -192,7 +192,7 @@ test('断丝重凝在序章同样生效（AC-21 不因换场景而失效）', ()
 
 /** 把玩家推到"三件事都学会了"的状态。 */
 function learnThreeVerbs(sc: PrologueScene): void {
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   sc.step(input({ reel: 'in' }))
   sc.step(input({ cutRope: 0 }))
 }
@@ -258,7 +258,7 @@ test('批 2：玩家动手（牵上丝线）之后，发光提示永久熄灭', 
   assert.equal(sc.glowBodyId(), sc.stone.id)
 
   // 玩家开始动手
-  sc.step(input({ aimPoint: { x: sc.stone.pos.x, y: sc.stone.pos.y }, attachPressed: true }))
+  fire(sc, sc.stone.pos)
   assert.equal(sc.glowBodyId(), -1, '玩家动手之后不该再提示他')
 })
 
@@ -412,15 +412,16 @@ test('批 3：**连梁柱 → 收丝 → 自己被拉了过去**（设计 §7 �
   const x0 = sc.player.pos.x
   const y0 = sc.player.pos.y
 
-  // 瞄准梁的**边缘**（不是中心）也应该连得上——大物体必须按表面算
-  sc.step(
-    input({
-      aimPoint: { x: C.BEAM_CENTER_X - C.BEAM_HALF_W, y: C.BEAM_CENTER_Y - C.BEAM_HALF_H },
-      attachPressed: true,
-    }),
-  )
-  assert.equal(sc.world.ropes[0]!.state, 'attached', '瞄准梁的边缘就该连得上')
+  // 瞄准梁的**某个点**（不是梁心）就应该挂在那一点上——第 13 轮的新规则
+  const aim = { x: sc.player.pos.x, y: C.BEAM_CENTER_Y - C.BEAM_HALF_H }
+  fire(sc, aim)
+  assert.equal(sc.world.ropes[0]!.state, 'attached', '瞄梁上任意一点就该连得上')
   assert.equal(sc.world.ropes[0]!.targetId, sc.beam.id)
+  assert.ok(
+    Math.abs(sc.world.ropes[0]!.anchorOffset.x + sc.beam.pos.x - aim.x) < 1e-9 &&
+      Math.abs(sc.world.ropes[0]!.anchorOffset.y + sc.beam.pos.y - aim.y) < 1e-9,
+    '附着点必须**就是松手的那一点**，不该被吸到物体中心',
+  )
 
   let airborne = false
   for (let i = 0; i < 180; i++) {
@@ -446,7 +447,7 @@ test('批 3：**连轻陶罐 → 收丝 → 它被拉了过来**（与梁柱形�
   const qx0 = sc.pot.pos.x
   const gap0 = Math.abs(qx0 - px0)
 
-  sc.step(input({ aimPoint: { x: sc.pot.pos.x, y: sc.pot.pos.y }, attachPressed: true }))
+  fire(sc, sc.pot.pos)
   assert.equal(sc.world.ropes[0]!.targetId, sc.pot.id, '应该连上的是轻陶罐')
 
   for (let i = 0; i < 90; i++) sc.step(input({ reel: 'in' }))
@@ -459,18 +460,19 @@ test('批 3：**连轻陶罐 → 收丝 → 它被拉了过来**（与梁柱形�
   )
 })
 
-test('批 3：两分钟没打死墨卒也会推进（不卡死），且不影响 AC-01 判定', () => {
+test('批 3（第 13 轮改）：**没打死墨卒就一直停在遭遇战** —— 段落推进只有进度门控，没有时间轴', () => {
   const sc = new PrologueScene()
   toEncounter(sc)
-  // 什么都不做，等过设计给的两分钟上限
-  for (let i = 0; i < 60 * (C.ENCOUNTER_MAX_SEC + 3); i++) sc.step(NO_INPUT)
+  // 什么都不做，干等 5 分钟（远超原先那条 120 秒兜底）
+  for (let i = 0; i < 60 * 300; i++) sc.step(NO_INPUT)
 
-  assert.equal(sc.currentStage, 'massdiff', '到点必须推进，否则失败者永远看不到后面的内容')
+  assert.equal(sc.currentStage, 'encounter', '创始人明确要求：没有时间线，做完上一步才进下一段')
+  assert.equal(sc.mote.alive, true, '墨卒还在，课还没上完')
   assert.equal(sc.telemetry.ac01Seconds(), null, '没击杀就是没击杀')
   assert.equal(sc.telemetry.ac01Passed(60), false)
 })
 
-test('批 3：质量差这节课"上到了"就能提前进双丝（把两个对照物都连一次）', () => {
+test('批 3：质量差这节课"上到了"就进双丝（梁柱与轻陶罐各连一次）', () => {
   const sc = new PrologueScene()
   toEncounter(sc)
   killMote(sc)
@@ -479,39 +481,48 @@ test('批 3：质量差这节课"上到了"就能提前进双丝（把两个对�
 
   // 走到够得着横梁的位置，连一次
   for (let i = 0; i < 90; i++) sc.step(input({ moveX: 1 }))
-  sc.step(
-    input({
-      aimPoint: { x: C.BEAM_CENTER_X - C.BEAM_HALF_W, y: C.BEAM_CENTER_Y - C.BEAM_HALF_H },
-      attachPressed: true,
-    }),
-  )
+  fire(sc, { x: sc.player.pos.x, y: C.BEAM_CENTER_Y - C.BEAM_HALF_H })
   assert.equal(sc.world.ropes[0]!.targetId, sc.beam.id)
   sc.step(input({ cutRope: 0 }))
   for (let i = 0; i < 100; i++) sc.step(NO_INPUT) // 等丝位重凝
 
   // 再连一次轻陶罐
-  sc.step(input({ aimPoint: { x: sc.pot.pos.x, y: sc.pot.pos.y }, attachPressed: true }))
+  fire(sc, sc.pot.pos)
   assert.equal(sc.world.ropes[0]!.targetId, sc.pot.id, '应该连上轻陶罐')
   sc.step(input({ cutRope: 0 }))
 
   for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
   assert.equal(sc.currentStage, 'dual', '两个对照物都摸过就该进双丝段')
-  assert.ok(
-    sc.telemetry.sinceStageSec(sc.world.tick, 'massdiff') < C.MASSDIFF_MAX_SEC,
-    '应该是"学会了"触发，而不是超时触发',
-  )
+})
+
+test('批 3（第 13 轮改）：只摸一个对照物**不会**推进（质量差必须成对才成立）', () => {
+  const sc = new PrologueScene()
+  toEncounter(sc)
+  killMote(sc)
+  for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
+  assert.equal(sc.currentStage, 'massdiff')
+
+  // 只连轻陶罐，不碰梁柱
+  fire(sc, sc.pot.pos)
+  assert.equal(sc.world.ropes[0]!.targetId, sc.pot.id)
+  for (let i = 0; i < 60 * 240; i++) sc.step(NO_INPUT)
+
+  assert.equal(sc.currentStage, 'massdiff', '没摸过梁柱就还没上完这节课，不该推进')
 })
 
 // ══════════════════════════════════════════════════════════
 //  批 4：8:00–12:00 双丝 + 悬吊横梁 + 深沟（= 门，D-041）
 // ══════════════════════════════════════════════════════════
 
-/** 走到双丝段（走超时路径，避免测试依赖玩家的具体站位）。 */
+/**
+ * 走到双丝段。
+ *
+ * 用 `skipTo('dual')`（调试跳段）而不是"把前面两段真的玩一遍"：
+ * 这一段之后的测试关心的都是**双丝段本身**的行为，前置两段各有自己的测试守着。
+ * 好处是这些测试不会因为前面某段的细节调参而跟着一起红。
+ */
 function toDualByTimeout(sc: PrologueScene): void {
-  toEncounter(sc)
-  for (let i = 0; i < 60 * (C.ENCOUNTER_MAX_SEC + 3); i++) sc.step(NO_INPUT)
-  assert.equal(sc.currentStage, 'massdiff')
-  for (let i = 0; i < 60 * (C.MASSDIFF_MAX_SEC + 3); i++) sc.step(NO_INPUT)
+  sc.skipTo('dual')
   assert.equal(sc.currentStage, 'dual')
 }
 
@@ -559,7 +570,7 @@ function crossChasm(sc: PrologueScene): void {
   }
 
   // 第一步
-  sc.step(input({ aimPoint: swingL, attachPressed: true }))
+  fire(sc, swingL)
   assert.equal(sc.world.ropes[0]!.targetId, sc.swingBeam.id, '第一步应连上悬吊横梁')
   reelUntilSettled(sc)
   const p1 = sc.player.pos
@@ -570,7 +581,7 @@ function crossChasm(sc: PrologueScene): void {
   assert.ok(p1.y > 5, `而且要真的离地（这就是设计 §4.2 说的"离地状态"），实际 y=${p1.y.toFixed(1)}`)
 
   // 第二步
-  sc.step(input({ aimPoint: { x: C.FAR_POST_CENTER_X, y: C.FAR_POST_CENTER_Y }, attachPressed: true }))
+  fire(sc, { x: C.FAR_POST_CENTER_X, y: C.FAR_POST_CENTER_Y })
   assert.equal(sc.world.ropes[1]!.targetId, sc.farPost.id, '第二步应连上对岸吊桩')
   sc.step(input({ cutRope: 0 }))
   assert.equal(sc.world.ropes[0]!.state, 'recovering', '必须断掉第一根，否则它会把人拽回沟心')
@@ -626,7 +637,7 @@ test('批 4：深沟只能靠丝过——从沟左沿够不着对岸吊桩（一
   toLedge(sc)
 
   // 一步到位连对岸吊桩：超丝长上限，必须连不上
-  sc.step(input({ aimPoint: { x: C.FAR_POST_CENTER_X, y: C.FAR_POST_CENTER_Y }, attachPressed: true }))
+  fire(sc, { x: C.FAR_POST_CENTER_X, y: C.FAR_POST_CENTER_Y })
   assert.equal(sc.world.ropes[0]!.targetId, -1, '够不着才对——否则沟就不是门')
   const d = Math.hypot(
     C.FAR_POST_CENTER_X - sc.player.pos.x,
@@ -634,12 +645,10 @@ test('批 4：深沟只能靠丝过——从沟左沿够不着对岸吊桩（一
   )
   assert.ok(d > C.ROPE_LEN_MAX, `左沿到吊桩 ${d.toFixed(1)}m 应超过丝长上限 ${C.ROPE_LEN_MAX}m`)
   // 而悬吊横梁够得着（"门"必须有解法）
-  sc.step(
-    input({
-      aimPoint: { x: C.SWING_BEAM_CENTER_X - C.SWING_BEAM_HALF_W, y: C.SWING_BEAM_CENTER_Y - C.SWING_BEAM_HALF_H },
-      attachPressed: true,
-    }),
-  )
+  fire(sc, {
+    x: C.SWING_BEAM_CENTER_X - C.SWING_BEAM_HALF_W,
+    y: C.SWING_BEAM_CENTER_Y - C.SWING_BEAM_HALF_H,
+  })
   assert.equal(sc.world.ropes[0]!.targetId, sc.swingBeam.id, '悬吊横梁必须够得着')
 })
 
@@ -684,12 +693,7 @@ test('批 4：收丝贴到静态结构上是**停下来**，不是陷进去抖�
   for (let i = 0; i < 30; i++) sc.step(NO_INPUT)
 
   // 连主横梁、一直收丝
-  sc.step(
-    input({
-      aimPoint: { x: sc.player.pos.x, y: C.BEAM_CENTER_Y - C.BEAM_HALF_H },
-      attachPressed: true,
-    }),
-  )
+  fire(sc, { x: sc.player.pos.x, y: C.BEAM_CENTER_Y - C.BEAM_HALF_H })
   assert.equal(sc.world.ropes[0]!.targetId, sc.beam.id)
   for (let i = 0; i < 200; i++) sc.step(input({ reel: 'in' }))
 

@@ -212,6 +212,9 @@ export class World {
     const p = this.player
     this.applyPlayerControl(input, p)
     this.applyRopeCommands(input, p)
+    // 飞行中的丝先推进：到位的那一帧立刻转 attached，于是"飞过去 → 绷住"发生在同一 tick 内，
+    // 飞行期间它不参与 applyForces / solveRopeConstraints（两处都只看 attached）。
+    this.stepFlyingRopes(p)
     this.applyForces(p)
     this.integrateVelocities()
     this.integratePositions()
@@ -284,28 +287,6 @@ export class World {
     return b.pos
   }
 
-  /**
-   * 丝线在**目标身上**的锚点：离主角最近的那一点。
-   *
-   * 为什么不是目标中心：大型物体上这个区别是致命的。序章的横梁有 16 米宽，
-   * 若锚点取中心，玩家站在梁左端下方连上去时绳长会瞬间变成 16.8m（上限 12m），
-   * 一连接就被猛拽。取最近表面点之后，绳长才等于玩家眼里的距离。
-   */
-  private targetAnchorOf(target: Body, from: Vec2): Vec2 {
-    const s = target.shape
-    const half = s.kind === 'circle' ? s.radius : Math.max(s.hw, s.hh)
-    // **大物体取表面最近点，小物体取中心。**
-    //
-    // 判据是"半尺寸是否超过附着容差"：超过之后，"瞄准物体的边缘"与"瞄准它的中心"
-    // 相差得比容差还远，玩家会觉得连不上；而且绳长会按中心虚高（16m 宽的横梁会虚高到 16.8m，
-    // 超过 ROPE_LEN_MAX=12 一连接就被猛拽）。
-    //
-    // 小物体（石块 0.5 / 陶罐 0.3 / 墨卒 0.4）仍取中心：那是标准模型，
-    // 也让手感与 M0 已通过的标定保持一致——把石块的锚点挪到表面上会让有效绳长少 0.5m，
-    // 实测甩速从 17 掉到 12.9，把已经验收过的手感改坏了。
-    return half > this.config.attachTolerance ? closestPointOnShape(from, target) : target.pos
-  }
-
   private applyRopeCommands(input: InputFrame, p: Body): void {
     // 断（先断后牵：允许同帧"断一根、牵一根"）
     if (input.cutRope >= 0) {
@@ -313,13 +294,10 @@ export class World {
       if (r !== undefined && r.state === 'attached') this.detach(r, 'cut')
     }
 
-    // 牵
-    if (input.attachPressed && input.aimPoint !== null && this.stunRemaining <= 0) {
+    // 牵（**松手发射**）：松手点即附着点，丝先飞过去，到位才开始受力。
+    if (input.firePressed && input.aimPoint !== null && this.stunRemaining <= 0) {
       const slot = this.firstIdleRope()
-      if (slot !== null) {
-        const target = this.pickAnchorable(p, input.aimPoint)
-        if (target !== null) this.attach(slot, target, p)
-      }
+      if (slot !== null) this.launch(slot, input.aimPoint, p)
     }
 
     // 收 / 放（对所有已附着的丝生效，设计 §3.1「缩短所有丝线」）
@@ -347,17 +325,22 @@ export class World {
     return null
   }
 
-  /** 按数组顺序取"离瞄准点最近且在容差内"的可附着物。顺序固定 ⇒ 确定性。 */
-  private pickAnchorable(player: Body, aim: Vec2): Body | null {
+  /**
+   * 松手点在哪个可附着物上（按数组顺序取最近的，顺序固定 ⇒ 确定性）。
+   *
+   * 判据是"松手点到物体**表面**的距离 ≤ `ROPE_AIM_TOLERANCE`"：
+   * 允许略微落在轮廓外面一点点（手指有宽度），但不能是明显的空白。
+   * 另外还要求主角到它的距离不超过丝长上限——丝是有射程的。
+   */
+  private pickAnchorableAt(player: Body, aim: Vec2): Body | null {
     const from = this.anchorOf(player)
     let best: Body | null = null
     let bestD = Number.POSITIVE_INFINITY
     for (const b of this.bodies) {
       if (!b.anchorable || b.tag === 'player' || !b.alive || b.removed) continue
-      // 用**到表面的距离**而不是到中心的距离：16 米宽的横梁不该要求玩家瞄准它的正中心
       const d = distanceToShape(aim, b)
       if (d > this.config.attachTolerance) continue
-      if (distanceToShape(from, b) > C.ROPE_LEN_MAX) continue
+      if (dist(from, closestPointOnShape(aim, b)) > C.ROPE_LEN_MAX) continue
       if (d < bestD) {
         bestD = d
         best = b
@@ -366,20 +349,92 @@ export class World {
     return best
   }
 
-  private attach(r: Rope, target: Body, player: Body): void {
-    r.state = 'attached'
+  /**
+   * 瞄准点的**预览信息**：这个点能不能附着、会落在哪个物体的哪一点。
+   *
+   * 渲染层用它把"可附着的物体"高亮出来、并画一个附着点标记——
+   * 这样"松手在空白处不附着"这条规则在按下去的时候就是**看得见**的，而不是松手才知道。
+   */
+  aimPreview(player: Body, aim: Vec2): { targetId: number; point: Vec2; valid: boolean } {
+    const target = this.pickAnchorableAt(player, aim)
+    if (target === null) return { targetId: -1, point: aim, valid: false }
+    return { targetId: target.id, point: closestPointOnShape(aim, target), valid: true }
+  }
+
+  /**
+   * **发射**：把丝从主角射向 `aim`。
+   *
+   * 松手点在空白处 ⇒ **什么也不做**（创始人明确的规则）。返回是否真的射出去了。
+   * 命中 ⇒ 立刻锁定"哪具刚体 + 表面上的哪一点"（局部偏移），进入 `flying`；
+   * 飞行期间不传力，到位那一帧才转 `attached` 并生成 Verlet 链。
+   */
+  launch(r: Rope, aim: Vec2, player: Body): boolean {
+    if (r.state !== 'idle') return false
+    const target = this.pickAnchorableAt(player, aim)
+    if (target === null) {
+      this.events.push({ kind: 'rope-missed', rope: r.index, at: aim })
+      return false
+    }
+
+    // 附着点：松手点吸附到该物体的**表面**（点在内部 ⇒ 推到最近的那条边）
+    const surface = closestPointOnShape(aim, target)
+    const from = this.anchorOf(player)
+    r.state = 'flying'
     r.targetId = target.id
-    // D-020：连接瞬间丝长 = 当前距离，不产生拉力；只有主动收丝才发力。
-    const a = this.anchorOf(player)
-    const b = this.targetAnchorOf(target, a)
-    r.targetLength = clampRopeLength(dist(a, b))
-    r.length = r.targetLength
+    r.anchorOffset = { x: surface.x - target.pos.x, y: surface.y - target.pos.y }
+    r.flyFrom = { x: from.x, y: from.y }
+    r.flyTip = { x: from.x, y: from.y }
+    r.length = dist(from, surface)
     r.tension = 0
     r.peakTension = 0
     r.lastBreakReason = 'none'
-    const chain = createVerletChain(a, b, C.ROPE_SEGMENTS)
-    this.chains[r.index] = chain
-    this.events.push({ kind: 'rope-attached', rope: r.index, target: target.id })
+    this.chains[r.index] = null
+    this.events.push({ kind: 'rope-launched', rope: r.index, target: target.id, at: surface })
+    return true
+  }
+
+  /** 附着点在**当前**世界坐标（目标会动，锚点跟着它走）。 */
+  private ropeAnchorOf(r: Rope, target: Body): Vec2 {
+    return { x: target.pos.x + r.anchorOffset.x, y: target.pos.y + r.anchorOffset.y }
+  }
+
+  /**
+   * 推进飞行中的丝线。到了就转 `attached`。
+   *
+   * 目标在飞行途中消失（陶罐被打碎等）⇒ 直接作废进重凝，不留下一条指向虚空的丝。
+   */
+  private stepFlyingRopes(p: Body): void {
+    for (const r of this.ropes) {
+      if (r.state !== 'flying') continue
+      const target = this.bodyById(r.targetId)
+      if (target === null || target.removed || !target.alive) {
+        r.state = 'recovering'
+        r.recongealRemaining = C.ROPE_RECONGEAL_SEC
+        r.targetId = -1
+        continue
+      }
+
+      const from = this.anchorOf(p)
+      const to = this.ropeAnchorOf(r, target)
+      r.flyFrom = { x: from.x, y: from.y }
+      const d = sub(to, r.flyTip)
+      const rest = len(d)
+      const stepLen = C.ROPE_LAUNCH_SPEED * C.DT
+      if (rest <= stepLen) {
+        // 到位：转成真正的附着，丝长 = 当前实际距离（不产生瞬时拉力，D-020）
+        r.flyTip = { x: to.x, y: to.y }
+        r.state = 'attached'
+        const a = this.anchorOf(p)
+        const b = this.ropeAnchorOf(r, target)
+        r.targetLength = clampRopeLength(dist(a, b))
+        r.length = r.targetLength
+        r.tension = 0
+        this.chains[r.index] = createVerletChain(a, b, C.ROPE_SEGMENTS)
+        this.events.push({ kind: 'rope-attached', rope: r.index, target: target.id })
+        continue
+      }
+      r.flyTip = { x: r.flyTip.x + (d.x / rest) * stepLen, y: r.flyTip.y + (d.y / rest) * stepLen }
+    }
   }
 
   private detach(r: Rope, reason: 'cut' | 'over-tension'): void {
@@ -431,7 +486,7 @@ export class World {
         continue
       }
 
-      const anchorB = this.targetAnchorOf(target, playerAnchor)
+      const anchorB = this.ropeAnchorOf(r, target)
       const d = sub(anchorB, playerAnchor)
       const L = len(d)
       r.length = L
@@ -486,7 +541,7 @@ export class World {
       if (target === null) continue
 
       const a = this.anchorOf(p)
-      const anchorB = this.targetAnchorOf(target, a)
+      const anchorB = this.ropeAnchorOf(r, target)
       const d = sub(anchorB, a)
       const L = len(d)
       if (L < 1e-9) continue
@@ -828,7 +883,7 @@ export class World {
       const anchorA = this.anchorOf(p)
       stepVerletChain(chain, {
         a: anchorA,
-        b: this.targetAnchorOf(target, anchorA),
+        b: this.ropeAnchorOf(r, target),
         restLength: Math.max(r.targetLength, 0.05),
         gravityY: this.config.gravityY,
         dt: C.DT,
@@ -847,7 +902,7 @@ export class World {
       if (r.state !== 'attached') continue
       const t = this.bodyById(r.targetId)
       if (t === null) continue
-      const d = distanceToSegment(point, a, this.targetAnchorOf(t, a))
+      const d = distanceToSegment(point, a, this.ropeAnchorOf(r, t))
       if (d <= bestD) {
         bestD = d
         best = r.index
@@ -865,7 +920,7 @@ export class World {
       if (r.state !== 'attached') continue
       const t = this.bodyById(r.targetId)
       if (t === null) continue
-      const d = distanceToSegment(point, a, this.targetAnchorOf(t, a))
+      const d = distanceToSegment(point, a, this.ropeAnchorOf(r, t))
       if (d < bestD) {
         bestD = d
         best = r.index
