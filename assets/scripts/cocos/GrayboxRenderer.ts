@@ -13,7 +13,14 @@
 
 import { Color, Graphics } from 'cc'
 import type { Body, Shape } from '../core/body'
-import { M0_ROOM_H, ROPE_LEN_MAX, VIEW_H, VIEW_ORIGIN_Y, VIEW_W } from '../core/constants'
+import {
+  M0_ROOM_H,
+  PLAYER_HAND_OFFSET_Y,
+  ROPE_LEN_MAX,
+  VIEW_H,
+  VIEW_ORIGIN_Y,
+  VIEW_W,
+} from '../core/constants'
 import { HUD_BUTTONS, type HudButtonId } from '../core/hud'
 import type { PlayableScene } from '../core/playable'
 import { chainPoints } from '../core/rope'
@@ -47,6 +54,10 @@ const C = {
   armorHurt: new Color(168, 96, 96, 255),
   armorDead: new Color(58, 52, 62, 255),
   armorEye: new Color(242, 236, 226, 255),
+  /** 血量格：满血 / 掉过血的 / 空格 */
+  hpFull: new Color(206, 176, 120, 220),
+  hpLoss: new Color(226, 132, 116, 245),
+  hpEmpty: new Color(120, 116, 112, 160),
   aim: new Color(122, 106, 58, 200),
   aimOk: new Color(150, 220, 140, 235),
   aimBad: new Color(210, 130, 120, 200),
@@ -237,6 +248,43 @@ export class GrayboxRenderer {
     }
   }
 
+  /**
+   * 敌人头顶的**血量条**（第 14 轮，创始人要求）。
+   *
+   * 为什么做成"分段条 + 数字"而不是细长条：
+   *   · 墨卒只有 3 点血，一条 200px 的细条掉 1 点几乎看不出来 —— 而玩家要的恰恰是
+   *     「**清楚的看到砸了多少**」；
+   *   · 所以一格 = 1 点血，掉一格就是"这一下砸掉了 1 点"，一眼可数；
+   *   · 旁边再放数字（由 `labels.ts` 画，Graphics 画不了字）。
+   *
+   * 它在**受击后**才出现（满血时半透明）：设计 FR-UI-005 的精神是"别让血条抢戏"，
+   * 而创始人的诉求是"看得见伤害"—— 两者折中：平时只是淡淡的框，被打过才醒目。
+   */
+  private drawHpBar(g: Graphics, b: Body): void {
+    if (b.maxHp <= 0) return
+    const SEG = 16
+    const GAP = 3
+    const n = Math.max(1, Math.round(b.maxHp))
+    const w = n * SEG + (n - 1) * GAP
+    const p = worldToLocal({ x: b.pos.x - w / 2 / 60, y: b.pos.y + 0.75 })
+    const hurt = b.hp < b.maxHp
+
+    for (let i = 0; i < n; i++) {
+      const x = p.x + i * (SEG + GAP)
+      const filled = i < Math.ceil(b.hp)
+      if (filled) {
+        g.fillColor = hurt ? C.hpLoss : C.hpFull
+        g.rect(x, p.y, SEG, 7)
+        g.fill()
+      } else {
+        g.lineWidth = 2
+        g.strokeColor = C.hpEmpty
+        g.rect(x, p.y, SEG, 7)
+        g.stroke()
+      }
+    }
+  }
+
   /** 从 (x, y) 往上画一条虚线到天花板。虚线节距固定，不含时间，录屏可复现。 */
   private strokeHangLine(g: Graphics, x: number, y: number): void {
     const from = worldToLocal({ x, y })
@@ -306,6 +354,10 @@ export class GrayboxRenderer {
           g.strokeColor = C.armorDead
           g.circle(worldToLocal(b.pos).x, worldToLocal(b.pos).y, metersToPx(b.shape.radius))
           g.stroke()
+          // **血量条**（第 14 轮，创始人要求：「敌人可以加上血量提示，
+          // 让玩家能清楚的看到砸了多少血量」）。
+          // 设计 FR-UI-005 原本写"不显示血条"，创始人现在明确要 —— 见 D-059。
+          this.drawHpBar(g, b)
         } else {
           // 石块：内圈让它看起来是"实心的石头"
           const c = worldToLocal(b.pos)

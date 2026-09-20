@@ -37,8 +37,8 @@ export class LabelLayer {
   private readonly slots: Slot[] = []
 
   constructor(parent: Node) {
-    // 先建一批：够用即可（5 按钮 + 14 刚体 + 2 地名）。
-    for (let i = 0; i < 28; i++) this.slots.push(this.makeSlot(parent, i))
+    // 先建一批：够用即可（5 按钮 + 14 刚体 + 2 血量数字 + 2 地名，留点余量）。
+    for (let i = 0; i < 36; i++) this.slots.push(this.makeSlot(parent, i))
   }
 
   private makeSlot(parent: Node, i: number): Slot {

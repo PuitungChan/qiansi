@@ -122,6 +122,23 @@ export interface Body {
   shattersOnDeath: boolean
 
   /**
+   * **易碎**（第 14 轮加）：任何达到 `MIN_DAMAGE_SPEED` 的撞击都**当场碎掉**，
+   * 不走伤害公式那两道门槛。
+   *
+   * 为什么需要它：设计 §2.5 的两道门槛是给**战斗**用的 ——
+   * 冲击要求 `m_eff = min(m_att, m_tgt) ≥ 3`、切割要求 `v ≥ 15`。
+   * 陶罐质量 0.6 ⇒ `min(4, 0.6) = 0.6` 被冲击门槛挡下，只剩切割 ——
+   * 也就是**必须扔到 15 m/s 以上才会碎**。而实测玩家朝目标方向的正常甩投是
+   * **15~16 m/s**，且只有约 2/3 的手法能做到 ⇒ "砸碎陶罐"这第一课对新手
+   * 变成了"打上去毫无反应"。创始人第 14 轮原话：「**砸不碎陶罐**」。
+   *
+   * 陶罐是我在 D-044 里自己定的"可破坏场景物"，设计里没有它的耐久口径，
+   * 所以这条规则由我定义：**罐子就是脆的，砸到就碎** —— 与它自己那句提示
+   * （"砸一下就碎，是你练断的靶子"）也对得上。
+   */
+  fragile: boolean
+
+  /**
    * 已被移出世界（碎裂、消散）。`detectContacts` 与渲染层都会跳过它。
    * 用布尔标记而不是从 `bodies` 数组里删元素 —— **数组下标就是刚体 id**，
    * 一删就会让 id 错位，确定性直接崩掉。
@@ -157,6 +174,8 @@ export interface BodyInit {
   weakness?: Weakness
   /** 死亡时碎裂消失（陶罐等易碎场景物）。见 `shattersOnDeath`。 */
   shattersOnDeath?: boolean
+  /** 易碎：撞到就碎，不走伤害门槛。见 `fragile`。 */
+  fragile?: boolean
   /**
    * **名义质量**。
    *
@@ -188,6 +207,7 @@ export function createBody(init: BodyInit): Body {
     anchorable: init.anchorable ?? false,
     ignorePlayer: false,
     shattersOnDeath: init.shattersOnDeath ?? false,
+    fragile: init.fragile ?? false,
     removed: false,
     momentum: { x: 0, y: 0 },
     kineticEnergy: 0,

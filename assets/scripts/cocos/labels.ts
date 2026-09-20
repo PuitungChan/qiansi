@@ -25,12 +25,18 @@ const BUTTON_TEXT = new Color(232, 226, 208, 240)
 const BUTTON_TEXT_DOWN = new Color(28, 24, 16, 255)
 const BODY_TEXT = new Color(226, 226, 226, 235)
 const HAZARD_TEXT = new Color(236, 150, 140, 235)
+/** 敌人血量数字：满血 / 已掉血 */
+const HP_FULL_TEXT = new Color(214, 188, 138, 235)
+const HP_LOSS_TEXT = new Color(240, 152, 134, 245)
 
 /** 刚体名字 → 标签文字。**没写的就不贴**（比如地面、墙）。 */
 const BODY_LABEL: Record<string, string> = {
   player: '我',
   stone: '石',
-  jar: '罐',
+  // ⚠️ 两个罐子的标签**故意不一样**：靶子那个不可附着（创始人明确要求"就按你原来的
+  // 方案设计成不可吸附"），轻陶罐那个可附着。同名会让人以为"两个都能勾"，
+  // 从而再踩一次「丝线附着不上陶罐」的坑。
+  jar: '靶',
   pot: '罐',
   mote: '卒',
   mote2: '卒',
@@ -82,6 +88,20 @@ export function labelSpecs(sc: PlayableScene, opts: LabelOptions): LabelSpec[] {
       size: 26,
       color: b.tag === 'enemy' ? HAZARD_TEXT : BODY_TEXT,
     })
+
+    // 敌人：名字下面再挂一行**血量数字**（第 14 轮，创始人要求"清楚的看到砸了多少血量"）。
+    // 分段的血条画在 Graphics 上（Graphics 画不了字），数字在这里。
+    if (b.tag === 'enemy' && b.maxHp > 0) {
+      const hurt = b.hp < b.maxHp
+      out.push({
+        key: `hp:${b.id}`,
+        text: `${Math.max(0, Math.round(b.hp))}/${Math.round(b.maxHp)}`,
+        x: s.x,
+        y: worldToScreen({ x: b.pos.x, y: b.pos.y + 0.75 }).y + 6,
+        size: 22,
+        color: hurt ? HP_LOSS_TEXT : HP_FULL_TEXT,
+      })
+    }
   }
 
   // ── 深沟：它不是刚体（是一道空隙），单独标一个 ──

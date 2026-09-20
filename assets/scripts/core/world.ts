@@ -779,12 +779,15 @@ export class World {
     // 注意：用 **damageMass**（设计口径的固有质量），而不是当前有效质量。
     // 主角着地时有效质量是 1e6，若拿它算伤害，走路撞一下就能秒掉墨甲——
     // 与设计「主角质量 0.5，不产生力量」直接冲突。
-    const res: DamageResult = resolveImpactAgainst(
-      attacker.damageMass,
-      target.damageMass,
-      target.weakness,
-      speed,
-    )
+    //
+    // **易碎场景物**（第 14 轮）：撞到就碎，不走两道门槛（见 `Body.fragile`）。
+    // 陶罐只有 0.6 质量，`min(4, 0.6) = 0.6` 被冲击门槛挡下、切割又要求 v ≥ 15；
+    // 而实测玩家朝目标方向的正常甩投是 15~16 m/s（且只有约 2/3 的手法能做到），
+    // 于是"砸碎陶罐"这第一课时灵时不灵。它本来就是我定的"可破坏场景物"（D-044），
+    // 耐久口径也由我定：**砸到就碎**。
+    const res: DamageResult = target.fragile
+      ? { type: 'impact', amount: Math.max(target.hp, 1), effective: true }
+      : resolveImpactAgainst(attacker.damageMass, target.damageMass, target.weakness, speed)
     if (!res.effective || res.amount <= 0) return
 
     target.hp -= res.amount

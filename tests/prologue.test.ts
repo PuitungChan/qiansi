@@ -73,9 +73,13 @@ test('序章参数与设计 §2.6 的质量表一致', () => {
   assert.equal(sc.stone.damageMass, 4, '石块 4')
   assert.equal(sc.jar.damageMass, 0.6, '陶罐 0.6')
   assert.equal(sc.jar.shattersOnDeath, true, '陶罐死亡即碎裂消失')
-  // 第 14 轮起陶罐**可以附着**了：创始人实机反馈「第一，丝线附着不上陶罐」。
-  // 场上两个陶罐长得一模一样，行为就该一样（都是 0.6 的轻物）。
-  assert.equal(sc.jar.anchorable, true, '陶罐必须可附着——两个罐子不能一个能连一个不能')
+  // 靶子**不可附着**：创始人先前提"附着不上陶罐"，我改成可附着，
+  // 随后他明确要求「就按你原来的方案设计成不可吸附吧」⇒ 改回来。
+  // 它是靶子，不是锚点。见 D-058 的修订。
+  assert.equal(sc.jar.anchorable, false, '靶子不可附着')
+  // **易碎**：撞到就碎。没有这一条它要 v ≥ 15 才会碎，而玩家朝目标方向的
+  // 正常甩投是 15~16 m/s ⇒ 第一课"砸碎罐子"时灵时不灵（创始人原话「砸不碎陶罐」）。
+  assert.equal(sc.jar.fragile, true, '靶子必须易碎（见 Body.fragile）')
   // 陶罐在投掷方向上，且远在射程内（D-039 有效射程 ~15m，D-031 交战距离 ≤ 8m）
   const dist = PROLOGUE.jarX - PROLOGUE.playerX
   assert.ok(dist > 4 && dist <= 10, `陶罐距离 ${dist}m 应落在"必须扔、但扔得到"的区间`)
@@ -713,14 +717,22 @@ test('批 4：深沟只能靠丝过——从沟左沿够不着对岸吊桩（一
 //  第 14 轮实机反馈的回归
 // ══════════════════════════════════════════════════════════
 
-test('#1 陶罐**能附着**了（创始人：「丝线附着不上陶罐」）', () => {
+test('#1 靶子**不能附着**（创始人后续要求），而**砸一下就碎**', () => {
   const sc = new PrologueScene()
+  assert.equal(sc.jar.anchorable, false, '靶子是靶子，不是锚点')
+  assert.equal(sc.jar.fragile, true, '而且必须易碎')
+
+  // 站在它旁边也连不上
   sc.player.pos = { x: sc.jar.pos.x - 3, y: C.PLAYER_HALF_H + 0.01 }
   for (let i = 0; i < 10; i++) sc.step(NO_INPUT)
+  assert.equal(fire(sc, sc.jar.pos), false, '不该连得上靶子')
 
-  assert.equal(sc.jar.anchorable, true, '靶子陶罐必须可附着')
-  assert.equal(fire(sc, sc.jar.pos), true, '应该能连上它')
-  assert.equal(sc.world.ropes[0]!.targetId, sc.jar.id)
+  // 但**中等速度**的石头就该砸碎它（8 m/s；改之前要 v ≥ 15 才会碎）
+  const slowEnough = new PrologueScene()
+  slowEnough.stone.pos = { x: 11, y: 0.51 }
+  slowEnough.stone.vel = { x: 8, y: 0 }
+  for (let i = 0; i < 90; i++) slowEnough.step(NO_INPUT)
+  assert.equal(slowEnough.jarBroken, true, '8 m/s 砸上去就该碎（易碎规则）')
 })
 
 test('#2 陶罐**推不进沟里**（创始人：「墨卒移动会把陶罐推进沟里」）', () => {
@@ -804,6 +816,50 @@ test('掉进沟里的**物件**会被送回出生点（纯进度门控下，否�
     `石块应被送回出生点 ${PROLOGUE.stoneX}，实际 ${sc.stone.pos.x.toFixed(2)}`,
   )
   assert.equal(sc.stone.pos.y > 0, true)
+})
+
+test('#3 甩起来的一击**真的能打死墨卒**（端到端：连上→甩→断→命中）', () => {
+  const sc = new PrologueScene()
+  fire(sc, sc.stone.pos)
+  sc.step(input({ reel: 'in' }))
+  sc.step(input({ cutRope: 0 }))
+  for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
+  assert.equal(sc.currentStage, 'encounter')
+
+  // 走到石头左边（这样甩出去是朝右、正对墨卒）
+  sc.player.pos = { x: sc.stone.pos.x - 3, y: C.PLAYER_HALF_H + 0.01 }
+  for (let i = 0; i < 10; i++) sc.step(NO_INPUT)
+  assert.ok(
+    sc.mote.pos.x > sc.stone.pos.x,
+    `墨卒应该在石头右边（间距 ${C.MOTE_STOP_DISTANCE}m 把它留在甩击空间之外），实际 石头=${sc.stone.pos.x.toFixed(1)} 墨卒=${sc.mote.pos.x.toFixed(1)}`,
+  )
+
+  // 等丝位重凝（刚断过丝，1.5s 内连不上——FR-PHY-007）
+  for (let i = 0; i < 120 && sc.world.ropes[0]!.state !== 'idle'; i++) sc.step(NO_INPUT)
+  assert.equal(sc.world.ropes[0]!.state, 'idle', '丝位重凝之后才连得上')
+
+  assert.equal(fire(sc, sc.stone.pos), true, '先连上石头')
+  // 一边左右跑一边按住收丝（这就是 M0 验收过的"甩"）
+  let released = false
+  for (let i = 0; i < 900 && !released; i++) {
+    sc.step(input({ moveX: Math.floor(i / 20) % 2 === 0 ? -1 : 1, reel: 'in' }))
+    const v = sc.stone.vel
+    const speed = Math.hypot(v.x, v.y)
+    // 甩到"朝右且够快（切割门槛 15）"就断丝
+    if (speed >= C.CUT_MIN_SPEED && v.x > 0) {
+      sc.step(input({ cutRope: 0 }))
+      released = true
+    }
+  }
+  assert.ok(released, '应该能在 15 秒内甩出一次"朝右且 ≥15 m/s"的投掷（这是这一课的核心动作）')
+
+  for (let i = 0; i < 300 && sc.mote.alive; i++) sc.step(NO_INPUT)
+  assert.equal(
+    sc.mote.alive,
+    false,
+    `这一击应该打死墨卒（HP ${C.MOTE_HP}，15 m/s 的切割伤害是 ${((C.CUT_MIN_SPEED * C.CUT_MIN_SPEED) / 60).toFixed(2)}）`,
+  )
+  assert.ok(sc.telemetry.ac01Passed(60), '而且这次击杀应该被 AC-01 记到账上')
 })
 
 test('批 4：掉进沟里 → 软重生回沟边（R1 不做死亡，D-040）', () => {
