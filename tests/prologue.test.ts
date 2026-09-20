@@ -470,8 +470,9 @@ test('批 3：**连梁柱 → 收丝 → 自己被拉了过去**（设计 §7 �
   assert.equal(sc.world.ropes[0]!.state, 'attached', '瞄梁上任意一点就该连得上')
   assert.equal(sc.world.ropes[0]!.targetId, sc.beam.id)
   assert.ok(
-    Math.abs(sc.world.ropes[0]!.anchorOffset.x + sc.beam.pos.x - aim.x) < 1e-9 &&
-      Math.abs(sc.world.ropes[0]!.anchorOffset.y + sc.beam.pos.y - aim.y) < 1e-9,
+    // 容差 1e-6：输入帧在构造时就量化到 1e-6（那是"回放能逐位复现"的前提，见 input.ts）
+    Math.abs(sc.world.ropes[0]!.anchorOffset.x + sc.beam.pos.x - aim.x) < 1e-6 &&
+      Math.abs(sc.world.ropes[0]!.anchorOffset.y + sc.beam.pos.y - aim.y) < 1e-6,
     '附着点必须**就是松手的那一点**，不该被吸到物体中心',
   )
 

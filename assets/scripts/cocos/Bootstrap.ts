@@ -41,6 +41,7 @@ import {
 import { DT, VIEW_H, VIEW_W } from '../core/constants'
 import { DEMO_TICKS, demoScript } from '../core/demo'
 import { EMPTY_INPUT, type InputFrame, encodeInput } from '../core/input'
+import { formatCaptureLines } from '../core/replay'
 import { predictTrajectory } from '../core/aim'
 import type { PlayableScene } from '../core/playable'
 import { M0Scenario } from '../core/scene_m0'
@@ -56,8 +57,23 @@ const { ccclass } = _decorator
 
 /** 每帧最多补几个固定步。防止卡顿后"追帧"变成死亡螺旋。 */
 const MAX_STEPS_PER_FRAME = 5
-/** 回放记录环形缓冲的长度（帧）。 */
-const REPLAY_BUFFER = 600
+
+/**
+ * 回放记录的上限（帧 = 3 分钟）。
+ *
+ * **为什么不是"最近 600 帧的环形缓冲"**（第 18 轮改）：环形缓冲把**开头丢掉**了，
+ * 于是导出的捕获从 tick 634 开始，本机从开局重跑时状态从一开始就对不上 ——
+ * 那份"回放"逐帧都不可信，只剩"输入序列"这一个用途。
+ *
+ * 现在的规则是：**从最后一次 reset 起录**，超过 3 分钟才丢弃最旧的帧，
+ * **并把丢了多少帧记在 `replayDropped` 里**（导出头部据此写 `from=`）。
+ * 这里的关键不是"能不能录更长"，而是**丢帧这件事必须被写进头部** ——
+ * 一份不完整的捕获如果自称"从开局起完整"，就会让"哈希对不上"被误读成"代码版本不同"。
+ *
+ * 正常复现流程（按 `R` → 做动作 → 按 `H`）远短于 3 分钟，`from` 就是 0，
+ * 导出的文本重新喂回来能**逐位复现**同一局。
+ */
+const REPLAY_RECORD_MAX = 60 * 180
 
 type SceneKind = 'prologue' | 'm0'
 
@@ -104,6 +120,19 @@ export class QiansiBootstrap extends Component {
 
   // 回放记录
   private replay: string[] = []
+  /**
+   * 因为超过 `REPLAY_RECORD_MAX` 而被丢掉的帧数。
+   * 它就是**保留下来那一段的起点帧号** —— 导出头部靠它如实写 `from=` / `truncated=`。
+   */
+  private replayDropped = 0
+  /**
+   * 录制起点那一刻的世界 tick。
+   *
+   * **为什么不能拿帧号当 tick**：序章在构造时会 `settle(12)`（让主角落地），
+   * 所以开局第一帧对应的 `world.tick` 是 **12**，不是 0；M0 沙盒的偏移可能不同。
+   * 导出头部把 `baseTick` 单独写出来，我才能把帧号换算成 tick 去对 `J` 导出的埋点。
+   */
+  private replayBaseTick = 0
 
   start(): void {
     // 设计分辨率在**代码里**设定，而不是依赖工程设置文件。
@@ -261,6 +290,9 @@ export class QiansiBootstrap extends Component {
     this.demoMode = false
     this.demoIndex = 0
     this.replay = []
+    this.replayDropped = 0
+    // 构造之后 `world.tick` 不是 0（序章 settle 了 12 步），所以起点 tick 要**问场景**。
+    this.replayBaseTick = this.scene.world.tick
   }
 
   update(dt: number): void {
@@ -301,7 +333,10 @@ export class QiansiBootstrap extends Component {
     }
 
     this.replay.push(encodeInput(frame))
-    if (this.replay.length > REPLAY_BUFFER) this.replay.shift()
+    if (this.replay.length > REPLAY_RECORD_MAX) {
+      this.replay.shift()
+      this.replayDropped++
+    }
   }
 
   private trackFps(dt: number): void {
@@ -328,7 +363,14 @@ export class QiansiBootstrap extends Component {
       return false
     }
 
-    if (pressed(KeyCode.KEY_R)) this.scene.reset()
+    if (pressed(KeyCode.KEY_R)) {
+      this.scene.reset()
+      // **必须一起清空回放记录**：记录的口径是"从开局起"，reset 之后旧帧就不是这一局的输入了。
+      // 不清的话导出的文本会"看起来从会话第 0 帧开始"，实际混着上一局的操作 —— 回放结果全是错的。
+      this.replay = []
+      this.replayDropped = 0
+      this.replayBaseTick = this.scene.world.tick
+    }
     if (pressed(KeyCode.KEY_P)) this.showPrediction = !this.showPrediction
     if (pressed(KeyCode.KEY_G)) this.showDebug = !this.showDebug
     if (pressed(KeyCode.KEY_L)) this.showLabels = !this.showLabels
@@ -366,15 +408,35 @@ export class QiansiBootstrap extends Component {
       this.scene.reset()
       this.demoMode = true
       this.demoIndex = 0
+      this.replay = []
+      this.replayDropped = 0
+      this.replayBaseTick = this.scene.world.tick
     }
     if (pressed(KeyCode.F2)) this.demoMode = false
     if (pressed(KeyCode.KEY_J)) this.exportTelemetry()
     if (pressed(KeyCode.KEY_H)) {
-      // 把最近的输入序列打到控制台 —— 我可以在本地用它精确复现你看到的那一刻（NFR-MNT-003）
+      // 把**从开局起**的输入序列打到控制台 —— 我可以在本地用它精确复现你看到的那一刻（NFR-MNT-003）。
+      //
+      // 头部**必须**由 `formatCapture()` 生成，不能在这里手写：上一版手写的
+      // `[qiansi] scene=…` 解析器根本不认，元数据全丢（第 18 轮修）。
+      // 产出与解析放在同一个文件里，就不会再各写一遍然后对不上。
+      const from = this.replayDropped
+      const truncated = from > 0
+      const header = formatCaptureLines(this.sceneKind, this.replay, {
+        tick: this.scene.world.tick,
+        baseTick: this.replayBaseTick,
+        hash: this.scene.world.stateHash(),
+        from,
+        truncated,
+      }).split('\n')
+      const note = truncated
+        ? '  ⚠️ 这一局超过 3 分钟，开头被截掉了 —— 本机重跑只能复现"输入节奏"，对不上 hash'
+        : '  ✅ 从开局起完整录制，本机重跑应当逐位复现 hash'
       console.log(
-        `[qiansi] scene=${this.sceneKind} hash=${this.scene.world.stateHash()} ` +
-          `tick=${this.scene.world.tick}\n` +
-          this.replay.join('\n'),
+        `${header[0]}\n${header[1]}${note}\n` +
+          `# 用法：把本行以下的全部文本存成 capture.txt，然后\n` +
+          `#   node --experimental-strip-types --import ./tests/register.mjs scripts/replay.ts capture.txt --events\n` +
+          header.slice(2).join('\n'),
       )
     }
   }
