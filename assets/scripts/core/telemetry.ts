@@ -49,6 +49,8 @@ export type TelemetryKind =
   | 'stage'
   /** 掉进深沟、被软重生拉回沟边 */
   | 'fall'
+  /** 某句引导第一次出现在屏幕上（key 是文案表的键名） */
+  | 'hint_shown'
   /** 试玩结束 */
   | 'run_end'
 
@@ -71,6 +73,8 @@ export class Telemetry {
   private encounterTick = -1
   private attachCount = 0
   private lastPosSample = -1
+  /** 已经记过 `hint_shown` 的引导键（同一句只记第一次，否则每帧刷屏）。 */
+  private readonly hintShown = new Set<string>()
 
   constructor(maxEvents = 20000) {
     this.maxEvents = maxEvents
@@ -184,6 +188,47 @@ export class Telemetry {
   /** 掉进深沟（软重生）。R1 不实现死亡，所以这是"兜底"而不是"失败"。 */
   markFall(tick: number, count: number): void {
     this.push(tick, 'fall', { n: count })
+  }
+
+  /**
+   * 某句引导**第一次出现在屏幕上**（第 14 轮新增）。
+   *
+   * 为什么必须记这个：创始人要求序章"把话说明白"，于是玩家不再是"自己想到用石头"，
+   * 而是"照着提示做"——AC-01 原本要量的东西被削弱了。
+   * 记下每句提示首次出现的时刻之后，AC-01 就可以**再算一次**：
+   * 「**在看到完整解法之前**就击杀」= `ac01UnaidedSeconds()`。
+   * 教了，但指标没废；两个数都给，谁说话都算数。
+   *
+   * 同一个 key 只记第一次（后面每帧都在显示，不该刷屏）。
+   */
+  markHint(tick: number, key: string): void {
+    if (this.hintShown.has(key)) return
+    this.hintShown.add(key)
+    this.push(tick, 'hint_shown', { key, atSec: this.sinceStart(tick) })
+  }
+
+  /** 某句引导第一次出现的时刻（相对遭遇战开始的秒数）；没出现过返回 null。 */
+  firstHintSec(key: string): number | null {
+    for (const e of this.events) {
+      if (e.kind === 'hint_shown' && e.key === key) {
+        return this.encounterTick < 0 ? e.t : (e.tick - this.encounterTick) / TICK_HZ
+      }
+    }
+    return null
+  }
+
+  /**
+   * **AC-01 的"无提示"版本**：在完整解法（`stepEncounterExplicit`）出现**之前**
+   * 就用石块击杀了吗？
+   *
+   * `null` = 没达成。已经教过之后才击杀的，这一项不算 —— 那测的是执行力，不是洞察力。
+   */
+  ac01UnaidedSeconds(): number | null {
+    const sec = this.ac01Seconds()
+    if (sec === null) return null
+    const taught = this.firstHintSec('stepEncounterExplicit')
+    if (taught === null) return sec // 一直没被点破 ⇒ 完全自主
+    return sec < taught ? sec : null
   }
 
   /** 某段落开始的绝对 tick；没进过返回 -1。 */

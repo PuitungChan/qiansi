@@ -17,6 +17,7 @@
 import { type Body, aabb, circle } from './body'
 import * as C from './constants'
 import type { InputFrame } from './input'
+import type { Guidance, PlayableScene } from './playable'
 import { World, type WorldConfig } from './world'
 
 /**
@@ -219,6 +220,11 @@ export class M0Scenario {
   /** M0 是调试沙盒，**没有任何提示**（它不是教学关卡）。 */
   hint(): string | null {
     return null
+  }
+
+  /** M0 是调试沙盒：不教任何东西，引导整块留空（第 14 轮的引导只服务序章）。 */
+  guidance(): Guidance {
+    return { goal: '', step: '', notes: [] }
   }
 
   /** M0 没有克制提示。 */

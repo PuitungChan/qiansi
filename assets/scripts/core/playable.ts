@@ -12,6 +12,20 @@ import type { Body } from './body'
 import type { InputFrame } from './input'
 import type { World } from './world'
 
+/**
+ * 一帧的引导内容（第 14 轮新增：创始人要求序章"把话说明白"）。
+ *
+ * 三块正好对应他列的三件事：
+ *   · `goal`  —— **这个游戏要干什么才能通过这一关**（一直挂在屏幕上）
+ *   · `step`  —— **现在这一步该干什么**（做完就换下一句）
+ *   · `notes` —— **当前场景里这些物体是干什么的**（按段出现）
+ */
+export interface Guidance {
+  readonly goal: string
+  readonly step: string
+  readonly notes: readonly string[]
+}
+
 export interface PlayableScene {
   readonly world: World
   readonly player: Body
@@ -26,11 +40,18 @@ export interface PlayableScene {
   summary(): Record<string, number | string>
 
   /**
-   * 当前该显示的**极简提示**（设计 §7 的教学手段）。
+   * 当前该显示的**极简提示**（设计 §7 的教学手段）。= `guidance().step`
    * `null` = 什么都不显示 —— 这是**正常状态**，不是"没实现"。
-   * 序章 3:00 之后恒为 null，那正是设计要的。
    */
   hint(): string | null
+
+  /**
+   * 引导内容（目标 + 当前这一步 + 物体作用）。见 `Guidance`。
+   *
+   * 与 `hint()` 的分工：`hint()` 是**屏幕中间那一句**，
+   * `guidance()` 是**整块引导**（含目标行与物体说明）。
+   */
+  guidance(): Guidance
 
   /**
    * 需要"发光提示"的刚体 id；`-1` = 无。

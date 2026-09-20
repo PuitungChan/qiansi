@@ -53,7 +53,7 @@ import { type Body, aabb, circle } from './body'
 import * as C from './constants'
 import { advanceHints, createHintState, hintStep, hintText, type HintState } from './hints'
 import type { InputFrame } from './input'
-import type { PlayableScene } from './playable'
+import type { Guidance, PlayableScene } from './playable'
 import { Telemetry } from './telemetry'
 import { t } from './texts'
 import { World, type WorldConfig } from './world'
@@ -238,22 +238,33 @@ export class PrologueScene implements PlayableScene {
       anchorable: true,
     })
 
-    // ── 陶罐：设计 §2.6 质量 0.6「高速弹丸」；本段当作**可破坏靶子**使用 ──
+    // ── 陶罐（本段当作**可破坏靶子**使用）────────────────────
     //
     // 为什么它一碰就碎、而敌人不是：陶罐 HP = 1 且弱点是 `any`，于是
     //   · 冲击公式要求 m_eff ≥ 3 ⇒ min(4, 0.6) = 0.6 被挡下
     //   · 切割公式 v²/60 ⇒ v ≈ 7.8 m/s 时达到 1 点伤害
     // 正好等价于"必须以投掷速度砸上去才会碎"，不需要为它单开一条规则（D-044）。
+    //
+    // ⚠️ 第 14 轮按创始人实机反馈改了两处：
+    //   ① **可附着**。原先写的是 `anchorable: false`（把它当"弹药"），结果场上摆着
+    //      两个长得一模一样的陶罐、其中一个怎么都射不上丝 —— 原话
+    //      「第一，丝线附着不上陶罐」。
+    //   ② **做成静态靶子（推不动）**。原话「第二，墨卒移动会把陶罐推进沟里」，
+    //      我实测到的推手其实有两个：墨卒（已用位置护栏挡住）、**以及在地上滚的石块**
+    //      —— 只要罐子还是动态的，"被推过沟沿"这件事就永远堵不干净。
+    //      做成静态之后它**物理上不可能**被推进沟里，投掷教学的目标也变成了固定靶。
+    //      代价说清楚：静态的它**没有"轻"的手感**（收丝会把你拉过去，而不是把它拉过来）。
+    //      质量差教学用的是 5:00 给出的那个**轻陶罐 `pot`**（仍然是动态 0.6），两者角色不同。
     const jar = w.addBody({
       name: 'jar',
-      kind: 'dynamic',
+      kind: 'static',
       tag: 'prop',
       shape: circle(0.3),
       pos: { x: PROLOGUE.jarX, y: 0.31 },
-      mass: 0.6,
+      damageMass: 0.6, // 设计 §2.6 的口径质量（静态刚体的 mass 是 0，见 D-047 的做法）
       friction: C.PROP_FRICTION,
       restitution: 0.1,
-      anchorable: false, // 陶罐是弹药，不是锚点
+      anchorable: true,
       hp: 1,
       weakness: 'any',
       shattersOnDeath: true,
@@ -405,6 +416,12 @@ export class PrologueScene implements PlayableScene {
     this.checkCleared()
 
     this.telemetry.consume(this.world, input)
+
+    // 引导埋点：记下每句提示**第一次**出现的时刻。
+    // AC-01 的"无提示"版本靠它算（见 D-058 与 telemetry.ac01UnaidedSeconds）。
+    // 必须放在 consume **之后**：run_start 是 consume 里惰性起的头，
+    // 放到前面会让"这条时间线的第一条事件"变成 hint_shown（确定性回放测试会红）。
+    this.telemetry.markHint(this.world.tick, this.stepKey())
   }
 
   /** 教学阶段 → 遭遇战 → 质量差 → 双丝。见文件头"进度门控"的说明。 */
@@ -553,9 +570,12 @@ export class PrologueScene implements PlayableScene {
 
     if (stage === 'dual') return
 
-    // 已通关：直接站在对岸平台上
+    // 已通关：直接站在对岸平台上，并把段落本身也切过去
     this.player.pos = { x: C.CHASM_RIGHT_X + 2, y: C.PLAYER_HALF_H + 0.01 }
     this.player.vel = { x: 0, y: 0 }
+    this.stage = 'cleared'
+    this.telemetry.markStage(this.world.tick, 'cleared')
+    this.telemetry.end(this.world.tick)
   }
 
   /**
@@ -585,15 +605,33 @@ export class PrologueScene implements PlayableScene {
    * R1 不实现主角承伤与死亡（D-040），而且设计 §11.2 明确写着
    * 「主角可以随时用丝位移逃命，**容错来自移动而非攻击**」。
    * 惩罚一个还在学操作的人会让 AC-01 测出的东西变味，所以这里只把他放回沟边。
+   *
+   * 第 14 轮补：**可动物件也一起救回来**。
+   * 它们掉进沟底就再也拿不到了（沟深 12 米、玩家不会跳），而段落是**纯进度门控**
+   * （D-054）—— 也就是说"把石块扔进沟里"会变成**死局**。深沟不是垃圾桶。
+   * 主角放回沟边、物件放回出生点，规则一致：掉下去不是惩罚，只是白费一次。
    */
   private checkFall(): void {
-    if (this.player.pos.y > C.CHASM_FALL_Y) return
-    if (this.player.pos.x < C.CHASM_LEFT_X || this.player.pos.x > C.CHASM_RIGHT_X) return
-    this.falls++
-    this.player.pos = { x: C.CHASM_RESPAWN_X, y: C.PLAYER_HALF_H + 0.05 }
-    this.player.vel = { x: 0, y: 0 }
-    this.player.grounded = false
-    this.telemetry.markFall(this.world.tick, this.falls)
+    if (this.player.pos.y <= C.CHASM_FALL_Y && this.inChasm(this.player.pos.x)) {
+      this.falls++
+      this.player.pos = { x: C.CHASM_RESPAWN_X, y: C.PLAYER_HALF_H + 0.05 }
+      this.player.vel = { x: 0, y: 0 }
+      this.player.grounded = false
+      this.telemetry.markFall(this.world.tick, this.falls)
+    }
+
+    for (const s of this.spawns) {
+      const b = s.body
+      if (b === this.player || b.kind === 'static' || b.removed) continue
+      if (b.pos.y > C.CHASM_FALL_Y || !this.inChasm(b.pos.x)) continue
+      b.pos = { x: s.x, y: s.y }
+      b.vel = { x: 0, y: 0 }
+      b.grounded = false
+    }
+  }
+
+  private inChasm(x: number): boolean {
+    return x > C.CHASM_LEFT_X && x < C.CHASM_RIGHT_X
   }
 
   /** 沟对面的墨卒：在右平台上缓慢往返（不追人——它在对岸当靶子）。 */
@@ -623,6 +661,18 @@ export class PrologueScene implements PlayableScene {
       m.vel = { x: 0, y: m.vel.y }
       return
     }
+
+    // **硬护栏：位置也不许越线**（第 14 轮补）。
+    //
+    // 原先只护栏"脚本给的向右速度"，挡不住**接触推挤**：玩家一路往右走，
+    // 墨卒被顶着越过沟沿（实测到 x=15.29），陶罐也被它顶着从 13 推到 15.95
+    // 掉进沟里 —— 创始人原话「第二，墨卒移动会把陶罐推进沟里」。
+    // 脚本驱动的教学怪必须有"不许进这个区域"的硬边界，速度护栏不够。
+    if (m.pos.x > C.PROLOGUE_MOTE_LEDGE_GUARD_X) {
+      m.pos = { x: C.PROLOGUE_MOTE_LEDGE_GUARD_X, y: m.pos.y }
+      if (m.vel.x > 0) m.vel.x = 0
+    }
+
     let vx = 0
     const gap = m.pos.x - this.player.pos.x
     if (gap > C.MOTE_STOP_DISTANCE) vx = -C.MOTE_SPEED
@@ -667,11 +717,92 @@ export class PrologueScene implements PlayableScene {
 
   // ── 表现层查询 ──────────────────────────────────────
 
-  /** 3:00 之后**不再有任何文字提示**（设计 §7）；通关时给一句「过了」。 */
+  /**
+   * 屏幕中间那一句 = 当前这一步该干什么。
+   *
+   * 第 14 轮起它**贯穿全程**（创始人：「我完全不知道我该干什么」）。
+   * 设计 §7 原来要求"3:00 之后零文字"，那是为了测"玩家会不会自己想到用石头"；
+   * 创始人现在明确要教，所以那一条被他自己推翻了（见 texts.ts 的文件头）。
+   */
   hint(): string | null {
-    if (this.stage === 'cleared') return t('cleared')
-    if (this.stage !== 'tutorial') return null
-    return hintText(this.hints)
+    return t(this.stepKey())
+  }
+
+  /**
+   * 当前这一步的**文案键**。
+   *
+   * 单独抽出来是为了让埋点记**键**而不是文字（`hint_shown` 事件）——
+   * 文字会改、键不会；AC-01 的"无提示"版本就是靠 `stepEncounterExplicit` 这个键算的。
+   */
+  private stepKey(): TextKey {
+    switch (this.stage) {
+      case 'tutorial': {
+        const s = hintStep(this.hints)
+        if (s === 'done') return this.jar.alive ? 'stepBreakJar' : 'cleared'
+        if (s === 'attach') return 'hintAttach'
+        if (s === 'reel') return 'hintReel'
+        return 'hintCut'
+      }
+      case 'encounter':
+        if (!this.mote.alive) return 'cleared'
+        return this.encounterElapsedSec() >= C.ENCOUNTER_EXPLICIT_HINT_SEC
+          ? 'stepEncounterExplicit'
+          : 'stepEncounterVague'
+      case 'massdiff':
+        return 'stepMassDiff'
+      case 'dual':
+        return 'stepDual'
+      default:
+        return 'cleared'
+    }
+  }
+
+  /**
+   * 整块引导：目标行 + 当前这一步 + 物体作用。
+   *
+   * 内容的取舍原则：**只教"该干什么"，不教"数值"**。
+   * 唯一一处例外是墨卒的 HP（`noteMote`）——因为"一下就能砸死"这件事
+   * 直接决定了玩家敢不敢试第一次。
+   */
+  guidance(): Guidance {
+    const step = t(this.stepKey())
+    switch (this.stage) {
+      case 'tutorial':
+        return {
+          goal: t('goalTutorial'),
+          step,
+          notes: this.hints.everCut ? [t('noteStone'), t('noteJar')] : [t('noteStone')],
+        }
+
+      case 'encounter':
+        return {
+          goal: t('goalEncounter'),
+          step,
+          notes: [t('noteStone'), t('noteMote')],
+        }
+
+      case 'massdiff':
+        return {
+          goal: t('goalMassDiff'),
+          step,
+          notes: [t('noteBeam'), t('notePot'), ...(this.jar.alive ? [t('noteJar')] : [])],
+        }
+
+      case 'dual':
+        return {
+          goal: t('goalDual'),
+          step,
+          notes: [t('noteChasm'), t('noteSwingBeam'), t('noteFarPost')],
+        }
+
+      default:
+        return { goal: t('goalCleared'), step, notes: [] }
+    }
+  }
+
+  private encounterElapsedSec(): number {
+    if (!this.telemetry.encounterStarted) return 0
+    return (this.world.tick - this.encounterStartTick()) / C.TICK_HZ
   }
 
   glowBodyId(): number {

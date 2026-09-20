@@ -27,8 +27,12 @@ import { M0Scenario } from '../assets/scripts/core/scene_m0'
  * - `7d282cd6465751f3` D-039 起：道具摩擦 0.4 → 0.1（补偿 M0 没有自转，投掷射程翻倍）
  * - `87798a76fdf50d33` 批 1 起：`removed`（碎裂标记）进入状态哈希
  * - `a6b7857ff68efb22` 批 4 起：`unlockedRopes`（丝位解锁进度）进入状态哈希
+ * - `c2856b1b7c876a42` 第 13 轮：丝线改为"松手发射 + 飞行 + 松手点即锚点"
+ * - `ec2bc6634a4e0ea6` 第 14 轮：`D-057`（没在收丝时丝线不给主角施力）
+ *   —— **断丝瞬间的甩速与命中都没变**（9.43 m/s / 墨甲掉到 20.1），说明甩动的手感
+ *   本来就由刚性约束承担，不依赖那条被拿掉的弹簧力
  */
-const EXPECTED_HASH = 'c2856b1b7c876a42'
+const EXPECTED_HASH = 'ec2bc6634a4e0ea6'
 
 test('演示脚本长度固定且不含任何随机性', () => {
   const a = demoScript()

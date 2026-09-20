@@ -71,6 +71,10 @@ export class QiansiBootstrap extends Component {
   private gfx!: Graphics
   private label!: Label
   private hintLabel!: Label
+  /** 目标行（第 14 轮引导）。 */
+  private goalLabel!: Label
+  /** 场上物体各是干什么的（第 14 轮引导）。 */
+  private notesLabel!: Label
   /** 小字标签层（第 13 轮：让物体一眼可分；L 键开关）。 */
   private bodyLabels!: LabelLayer
 
@@ -204,29 +208,47 @@ export class QiansiBootstrap extends Component {
   }
 
   /**
-   * 极简提示（设计 §7 唯一的教学手段）。
+   * 引导文字（第 14 轮）：
+   *   · **目标行**（屏幕顶部）—— 这一关要干什么，一直挂着；
+   *   · **当前这一步**（屏幕中上方，字号最大）—— 现在按什么、做什么；
+   *   · **物体说明**（目标行下面几行小字）—— 场上这些东西各是干什么的。
    *
-   * 放在**屏幕中上方**、字号明显大于调试面板 —— 它必须一眼看到，但不能抢走玩法层的注意力。
-   * 设计 §8.4 规定全游戏文本 ≤ 500 字，序章这 3 句就是其中最重要的 15 个字。
+   * 为什么拆成三个节点而不是一个多行 Label：它们的**字号、颜色、位置**都不同，
+   * 而且是要一眼分层的（目标 → 动作 → 名词解释）。多行 Label 做不到这个层级。
    */
   private buildHintLabel(): void {
-    const node = new Node('Hint')
+    this.hintLabel = this.makeLabel('Hint', 0, 300, 42, new Color(240, 226, 190, 240), 1400)
+    this.goalLabel = this.makeLabel('Goal', 0, 440, 34, new Color(196, 220, 236, 235), 1400)
+    this.notesLabel = this.makeLabel('Notes', 0, -470, 24, new Color(178, 182, 188, 225), 1400, 4)
+  }
+
+  /** 建一个居中 Label 节点（引导文字共用）。 */
+  private makeLabel(
+    name: string,
+    x: number,
+    y: number,
+    size: number,
+    color: Color,
+    width: number,
+    height = 1,
+  ): Label {
+    const node = new Node(name)
     node.layer = Layers.Enum.UI_2D
     node.parent = this.node
     const ui = node.addComponent(UITransform)
     ui.setAnchorPoint(0.5, 0.5)
-    ui.setContentSize(1200, 80)
-    node.setPosition(0, 330, 0)
+    ui.setContentSize(width, size * 1.6 * height)
+    node.setPosition(x, y, 0)
     const label = node.addComponent(Label)
     label.string = ''
     label.useSystemFont = true
-    label.fontSize = 40
-    label.lineHeight = 48
+    label.fontSize = size
+    label.lineHeight = Math.round(size * 1.35)
     label.horizontalAlign = Label.HorizontalAlign.CENTER
-    label.verticalAlign = Label.VerticalAlign.CENTER
+    label.verticalAlign = Label.VerticalAlign.TOP
     label.enableWrapText = false
-    label.color = new Color(240, 226, 190, 235)
-    this.hintLabel = label
+    label.color = color
+    return label
   }
 
   /** 建/重建当前场景。 */
@@ -430,9 +452,12 @@ export class QiansiBootstrap extends Component {
       }),
     )
 
-    // 极简提示（设计 §7）
+    // 引导文字（第 14 轮：创始人要求序章把机制与目标说明白）
     if (this.hintLabel !== undefined) {
-      this.hintLabel.string = this.scene.hint() ?? ''
+      const g = this.scene.guidance()
+      this.hintLabel.string = g.step
+      if (this.goalLabel !== undefined) this.goalLabel.string = g.goal
+      if (this.notesLabel !== undefined) this.notesLabel.string = g.notes.join('\n')
     }
 
     if (this.showDebug && this.label !== undefined) {

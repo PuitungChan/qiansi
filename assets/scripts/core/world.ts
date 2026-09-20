@@ -204,6 +204,9 @@ export class World {
 
   // ── 主步进 ──────────────────────────────────────────
 
+  /** 本帧玩家是否**真的**把某根丝收短了（刚性约束用来区分"自己走远"与"收丝"，D-057）。 */
+  private reeledInThisTick = false
+
   step(input: InputFrame): void {
     this.events.length = 0
     this.tick++
@@ -307,13 +310,21 @@ export class World {
     // 失控的前提消失，因此堵转已删除——收丝现在是纯粹的直接控制。
     if (input.reel !== 'hold' && this.stunRemaining <= 0) {
       const step = this.config.reelSpeed * C.DT
+      // 记下"这一帧真的把丝收短了"：刚性约束要靠它区分
+      // "主角自己在往外走"（→ 只挡不拽）与"玩家在收丝"（→ 该把人拉过去）。见 D-057。
+      this.reeledInThisTick = false
       for (const r of this.ropes) {
         if (r.state !== 'attached') continue
-        r.targetLength =
-          input.reel === 'in'
-            ? clampRopeLength(r.targetLength - step)
-            : clampRopeLength(r.targetLength + step)
+        if (input.reel === 'in') {
+          const next = clampRopeLength(r.targetLength - step)
+          if (next < r.targetLength) this.reeledInThisTick = true
+          r.targetLength = next
+        } else {
+          r.targetLength = clampRopeLength(r.targetLength + step)
+        }
       }
+    } else {
+      this.reeledInThisTick = false
     }
   }
 
@@ -511,11 +522,32 @@ export class World {
       if (T > r.peakTension) r.peakTension = T
       if (T <= 0) continue
 
-      // 丝只能拉：目标被拉向主角（−n），主角被拉向目标（+n）。
+      // 丝只能拉：目标被拉向主角（−n）。
       this.fx[target.id] -= nx * T
       this.fy[target.id] -= ny * T
-      this.fx[p.id] += nx * T
-      this.fy[p.id] += ny * T
+
+      // ── 主角这一端：**只有收丝时才吃弹簧力**（D-057，第 14 轮实机反馈）──
+      //
+      // 创始人原话：「我连接到横梁之后移动到丝线张力范围外后会被**直接拉到天上**，
+      // 这显然不是我想要的效果……我希望到达张力最大之后只是我的**人物无法继续移动**
+      // （最多是由于弹性势能被回拉一点位置）而不是被拉走，**人物能被拉走的方式是收丝**。」
+      //
+      // 拆成两条规则，正好对应他这句话：
+      //   · **在收丝** ⇒ 全额施力（那是玩家主动要的，"重的东西把你拉过去"就是这个）；
+      //   · **没在收丝** ⇒ **一点力都不给主角**，只留刚性约束（见 solveRopeConstraints）。
+      //     刚性约束只会**取消**"相互远离"的速度分量，**永远不会给主角加速度**。
+      //
+      // 为什么"没在收丝时也不能给一点点力"：丝一旦绷紧，`L > 目标丝长` 就一直成立，
+      // 弹簧力会**持续**存在。哪怕只有 25 m/s²，一秒之后也是 25 m/s —— 人还是会被慢慢吊上去。
+      // 所以这里必须是"零"，不能是"小"。
+      //
+      // 至于原来那个 240 g 的暴击：张力上限 1200 N 对 0.5 kg 是 240 g。主角着地时
+      // 等效质量 1e6，这个力什么都做不了（所以走路时毫无感觉）；可一旦踏空、质量回到 0.5，
+      // 同一根绷紧的丝在一帧内就把他推成 **vy = +29 m/s**。实测就是这么上天的。
+      if (this.reeledInThisTick) {
+        this.fx[p.id] += nx * T
+        this.fy[p.id] += ny * T
+      }
     }
   }
 
@@ -530,6 +562,17 @@ export class World {
    * - 两端都动不了 ⇒ 谁也过不去，主角**无法继续往张力增大的方向移动**
    *
    * 同时取消沿丝线方向**相互远离**的速度分量，否则每帧都会被弹簧再拉开一次、来回抖。
+   *
+   * ## 第 14 轮补的一条：**着地的主角只被"挡住"，不被"拽起"**（D-057）
+   *
+   * 位置修正的方向是"沿丝线指向锚点"。锚点在头顶时（序章的横梁），这个方向的**竖直分量**
+   * 会把一个**站在地上**的人往上推——推离地面之后他就不再着地，等效质量从 1e6 掉回 0.5，
+   * 于是越推越高。实测：连着横梁一直往右走，人在 15.4 处被抬到 14.2 米。
+   *
+   * 创始人要的是「到达张力最大之后只是我的人物无法继续移动……而不是被拉走」，
+   * 所以**着地且没有在收丝**时，把修正改成**只夹水平方向**：
+   * 解出 `|锚点 − (x, 手部y)| = 最大丝长` 的那个 x，把主角**在地上**推回可达范围，
+   * 竖直方向一点不动。要离地只能靠收丝（见 applyForces 的说明）。
    */
   private solveRopeConstraints(): void {
     const p = this.player
@@ -548,6 +591,24 @@ export class World {
 
       const maxLen = r.targetLength + limit
       if (L <= maxLen) continue
+
+      // ── 着地 + 没在收丝 ⇒ 水平夹住（D-057）──
+      // 收丝时不走这条路：收丝是**唯一**能把主角拉离地面的手段，必须保留径向修正。
+      if (p.grounded && !this.reeledInThisTick) {
+        const dy = anchorB.y - a.y
+        const r2 = maxLen * maxLen - dy * dy
+        if (r2 > 0 && target.invMass === 0) {
+          const dxMax = Math.sqrt(r2)
+          const away = Math.sign(a.x - anchorB.x) || 1
+          const dist = Math.abs(a.x - anchorB.x)
+          if (dist > dxMax) {
+            p.pos = { x: anchorB.x + away * dxMax, y: p.pos.y }
+            // 取消"继续往外走"的速度，否则下一帧又被弹簧推回来、来回蹭
+            if (p.vel.x * away > 0) p.vel.x = 0
+          }
+          continue
+        }
+      }
 
       const invSum = p.invMass + target.invMass
       if (invSum <= 0) continue

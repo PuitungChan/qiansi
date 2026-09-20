@@ -50,8 +50,9 @@ const C = {
   aim: new Color(122, 106, 58, 200),
   aimOk: new Color(150, 220, 140, 235),
   aimBad: new Color(210, 130, 120, 200),
-  /** 射程圈：告诉玩家"丝最多够到这么远" */
-  range: new Color(96, 92, 74, 150),
+  /** 射程提示：虚线边界 + 很淡的填充盘（第 14 轮加强，见 drawAim） */
+  range: new Color(150, 138, 96, 190),
+  rangeFill: new Color(120, 110, 78, 22),
   hudIdle: new Color(138, 138, 144, 255),
   hudUsed: new Color(232, 196, 106, 255),
   hudCooling: new Color(90, 90, 96, 255),
@@ -199,6 +200,9 @@ export class GrayboxRenderer {
   private drawTerrain(g: Graphics, sc: PlayableScene): void {
     for (const b of sc.world.bodies) {
       if (b.kind !== 'static' || b.removed) continue
+      // **静态的"道具"不在这里画**：序章那个可破坏陶罐是个静态刚体（推不动的靶子），
+      // 但它必须长得像陶罐、不像一堵墙 —— 交给 drawBodies 按道具画。
+      if (b.tag === 'prop') continue
       // 按**名字语义**上色：地面/沟底用亮一档的灰，墙与天花板暗一档。
       // 不按具体名字硬编码，这样加新地形（深沟、平台）不用改渲染层。
       const isFloor = b.name.includes('ground') || b.name.includes('floor')
@@ -259,7 +263,8 @@ export class GrayboxRenderer {
    */
   private drawBodies(g: Graphics, sc: PlayableScene): void {
     for (const b of sc.world.bodies) {
-      if (b.kind === 'static' || b.removed) continue
+      // 静态**道具**（序章那个推不动的陶罐靶子）也要按道具画，不能当地形。
+      if (b.removed || (b.kind === 'static' && b.tag !== 'prop')) continue
       const fill = colorOf(b)
 
       if (b.tag === 'player') {
@@ -394,24 +399,58 @@ export class GrayboxRenderer {
    *   ③ **附着点标记**：命中时在吸附点上画一个绿环并把该物体描亮，落空时画红叉。
    */
   private drawAim(g: Graphics, sc: PlayableScene, aim: { x: number; y: number }): void {
-    const from = worldToLocal({
-      x: sc.player.pos.x,
-      y: sc.player.pos.y + 0.4,
-    })
+    // 出丝点是**手**的位置，射程也是从手量起 —— 玩家看到的是"我能勾多远"。
+    const handWorld = { x: sc.player.pos.x, y: sc.player.pos.y + PLAYER_HAND_OFFSET_Y }
+    const from = worldToLocal(handWorld)
+    const center = worldToLocal(handWorld)
+    const reachPx = metersToPx(ROPE_LEN_MAX)
+    const distToAim = Math.hypot(aim.x - handWorld.x, aim.y - handWorld.y)
+    const outOfRange = distToAim > ROPE_LEN_MAX
 
-    // 射程圈
-    const center = worldToLocal(sc.player.pos)
-    g.lineWidth = 1
+    // ── 射程提示（第 14 轮加强）──────────────────────────
+    //
+    // 创始人原话：「由于丝线有长度限制，作为玩家我无法直观地感受到我能连接多远的物体，
+    // 希望在我瞄准的时候能加上一个范围提示」。上一轮只画了一条 1px 的细圆，
+    // 太容易被忽略，所以现在做成**三件套**：
+    //   ① 一个很淡的**填充盘** —— 一眼看出"这一片够得着"；
+    //   ② 一条**虚线边界** —— 边界在哪看得清（虚线而不是实线，是为了不与地形抢视觉）；
+    //   ③ 超出射程时，**瞄准线变红**并在边界上打一个叉 —— 明确告诉你"这一枪到不了"。
+    g.fillColor = C.rangeFill
+    g.circle(center.x, center.y, reachPx)
+    g.fill()
+
+    g.lineWidth = 3
     g.strokeColor = C.range
-    g.circle(center.x, center.y, metersToPx(ROPE_LEN_MAX))
+    const DASH = 64
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / DASH) {
+      g.moveTo(center.x + Math.cos(a) * reachPx, center.y + Math.sin(a) * reachPx)
+      const a2 = a + Math.PI / (DASH * 2)
+      g.lineTo(center.x + Math.cos(a2) * reachPx, center.y + Math.sin(a2) * reachPx)
+    }
     g.stroke()
 
     const to = worldToLocal(aim)
-    g.lineWidth = 2
-    g.strokeColor = C.aim
+    g.lineWidth = outOfRange ? 3 : 2
+    g.strokeColor = outOfRange ? C.aimBad : C.aim
     g.moveTo(from.x, from.y)
     g.lineTo(to.x, to.y)
     g.stroke()
+
+    // 超出射程：在边界上画个叉，线就停在"够得着的最远处"
+    if (outOfRange && distToAim > 1e-6) {
+      const k = ROPE_LEN_MAX / distToAim
+      const edge = worldToLocal({
+        x: handWorld.x + (aim.x - handWorld.x) * k,
+        y: handWorld.y + (aim.y - handWorld.y) * k,
+      })
+      g.lineWidth = 4
+      g.strokeColor = C.aimBad
+      g.moveTo(edge.x - 16, edge.y - 16)
+      g.lineTo(edge.x + 16, edge.y + 16)
+      g.moveTo(edge.x + 16, edge.y - 16)
+      g.lineTo(edge.x - 16, edge.y + 16)
+      g.stroke()
+    }
 
     // 这一枪能不能连上？
     const preview = sc.world.aimPreview(sc.player, aim)
@@ -427,7 +466,8 @@ export class GrayboxRenderer {
       // 把目标物体也描一圈，明确"你会挂在这个东西上"
       const target = sc.world.bodyById(preview.targetId)
       if (target !== null) this.strokeShape(g, target, C.aimOk)
-    } else {
+    } else if (!outOfRange) {
+      // 够得着，但那儿没东西 —— 这就是"松手在空白处不附着"
       g.lineWidth = 3
       g.strokeColor = C.aimBad
       g.moveTo(to.x - 9, to.y - 9)

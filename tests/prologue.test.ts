@@ -73,7 +73,9 @@ test('序章参数与设计 §2.6 的质量表一致', () => {
   assert.equal(sc.stone.damageMass, 4, '石块 4')
   assert.equal(sc.jar.damageMass, 0.6, '陶罐 0.6')
   assert.equal(sc.jar.shattersOnDeath, true, '陶罐死亡即碎裂消失')
-  assert.equal(sc.jar.anchorable, false, '陶罐是弹药，不是锚点')
+  // 第 14 轮起陶罐**可以附着**了：创始人实机反馈「第一，丝线附着不上陶罐」。
+  // 场上两个陶罐长得一模一样，行为就该一样（都是 0.6 的轻物）。
+  assert.equal(sc.jar.anchorable, true, '陶罐必须可附着——两个罐子不能一个能连一个不能')
   // 陶罐在投掷方向上，且远在射程内（D-039 有效射程 ~15m，D-031 交战距离 ≤ 8m）
   const dist = PROLOGUE.jarX - PROLOGUE.playerX
   assert.ok(dist > 4 && dist <= 10, `陶罐距离 ${dist}m 应落在"必须扔、但扔得到"的区间`)
@@ -91,7 +93,7 @@ test('设计 §7 的三句提示按"玩家做到了"推进，而不是按秒表'
   assert.equal(hintStep(s), 'done')
 })
 
-test('提示推进由真实操作驱动（连上 → 收丝 → 断丝）', () => {
+test('提示推进由真实操作驱动（连上 → 收丝 → 断丝 → 去砸陶罐）', () => {
   const sc = new PrologueScene()
   assert.equal(sc.hint(), TEXTS.hintAttach)
 
@@ -103,9 +105,27 @@ test('提示推进由真实操作驱动（连上 → 收丝 → 断丝）', () =
   sc.step(input({ reel: 'in' }))
   assert.equal(sc.hint(), TEXTS.hintCut)
 
-  // 断丝
+  // 断丝：三件事学完，但**提示不会消失**
+  // ⚠️ 第 14 轮：设计 §7 原来要求"三件都学会之后什么都不显示"，
+  // 创始人试玩后推翻了它（「我完全不知道我该干什么」）。现在会接着说下一步。
   sc.step(input({ cutRope: 0 }))
-  assert.equal(sc.hint(), null, '断完丝之后进入"无提示"状态——这是设计要的，不是 bug')
+  assert.equal(sc.hint(), TEXTS.stepBreakJar, '三件事学完就该告诉玩家下一步：去砸陶罐')
+})
+
+test('引导：目标行随段落变化，物体说明按段出现（第 14 轮创始人要求）', () => {
+  const sc = new PrologueScene()
+  assert.equal(sc.guidance().goal, TEXTS.goalTutorial)
+  assert.ok(
+    sc.guidance().notes.some((n) => n.includes('石头')),
+    '开局就该说清石头是干什么的',
+  )
+
+  sc.skipTo('dual')
+  assert.equal(sc.guidance().goal, TEXTS.goalDual, '到了深沟段，目标要变成"过沟"')
+  const notes = sc.guidance().notes.join(' ')
+  assert.ok(notes.includes('深沟') && notes.includes('悬吊横梁') && notes.includes('吊桩'),
+    `过沟段的物体说明要覆盖三样关键东西，实际：${notes}`)
+  assert.equal(sc.guidance().step, TEXTS.stepDual)
 })
 
 test('陶罐：轻轻蹭到不会碎，扔上去才会碎（D-044）', () => {
@@ -166,16 +186,20 @@ test('序章批 1 也是确定性的（同一输入序列 → 同一哈希）', 
   assert.equal(play(), play())
 })
 
-test('NFR-I18N-003：玩家可见文案全部走资源表，且总量远低于 500 字', () => {
+test('NFR-I18N-003：玩家可见文案全部走资源表（字数预算已被创始人放宽）', () => {
   assert.ok(totalTextLength() > 0)
+  // ⚠️ 第 14 轮：创始人明确要求序章"加上文字提示：介绍当前场景的物体的作用、
+  // 现在这一步该干什么、这个游戏要干什么才能通过这一关"。
+  // 设计 §8.4 的 ≤ 500 字预算因此被**他自己**放宽（见 texts.ts 文件头）。
+  // 这里不再断言"≤ 500"，改为断言"有一个上限、并且超了就看得见"：
   assert.ok(
-    totalTextLength() <= 500,
-    `全游戏文本 ${totalTextLength()} 字，必须 ≤ 500（FR-UI-007）`,
+    totalTextLength() <= 900,
+    `全游戏文本 ${totalTextLength()} 字 —— 已经被放宽到 900，超过就说明又加了一堆话，该复查`,
   )
-  // 这三句必须逐字等于设计 §7 的原文
-  assert.equal(TEXTS.hintAttach, '按住，拖向石头')
-  assert.equal(TEXTS.hintReel, '按住不放')
-  assert.equal(TEXTS.hintCut, '点一下丝线')
+  // 三句提示仍然在表里（文字改成了"按哪里"的完整说法，键名没变）
+  assert.ok(TEXTS.hintAttach.length > 0)
+  assert.ok(TEXTS.hintReel.length > 0)
+  assert.ok(TEXTS.hintCut.length > 0)
 })
 
 test('断丝重凝在序章同样生效（AC-21 不因换场景而失效）', () => {
@@ -214,12 +238,34 @@ test('批 2：三件事都学会后，墨卒从右侧入场（设计 §7 3:00）
   assert.equal(sc.telemetry.encounterStarted, true)
 })
 
-test('批 2：3:00 之后**不再有任何文字提示**（设计 §7）', () => {
+test('批 2（第 14 轮改）：遭遇战**先给方向、攒够时间再给解法**', () => {
   const sc = new PrologueScene()
   learnThreeVerbs(sc)
   for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
   assert.equal(sc.currentStage, 'encounter')
-  assert.equal(sc.hint(), null, '遭遇战阶段必须零文字提示')
+  // ⚠️ 设计 §7 原来要求"3:00 之后零文字提示"（为了测"玩家会不会自己想到"）。
+  // 创始人试玩后推翻了它（「我完全不知道我该干什么」），但仍然要求保留"先自己想"的空间，
+  // 所以做成两级：先方向、`ENCOUNTER_EXPLICIT_HINT_SEC` 秒后再点破。
+  assert.equal(sc.hint(), TEXTS.stepEncounterVague, '刚入场只给方向，不直接给答案')
+
+  for (let i = 0; i < 60 * (C.ENCOUNTER_EXPLICIT_HINT_SEC + 1); i++) sc.step(NO_INPUT)
+  assert.equal(sc.hint(), TEXTS.stepEncounterExplicit, '攒够时间就把完整解法说出来')
+  assert.equal(sc.mote.alive, true, '（这一段测试里玩家什么都没做，墨卒当然还活着）')
+})
+
+test('埋点：每句引导第一次出现的时刻都被记下来（AC-01 的"无提示"版本靠它）', () => {
+  const sc = new PrologueScene()
+  sc.step(NO_INPUT)
+  assert.ok(sc.telemetry.firstHintSec('hintAttach') !== null, '开局那句要被记下')
+
+  learnThreeVerbs(sc)
+  for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
+  assert.equal(sc.telemetry.firstHintSec('stepEncounterExplicit'), null, '还没到点破的时候')
+
+  for (let i = 0; i < 60 * (C.ENCOUNTER_EXPLICIT_HINT_SEC + 1); i++) sc.step(NO_INPUT)
+  const taught = sc.telemetry.firstHintSec('stepEncounterExplicit')
+  assert.ok(taught !== null && taught >= C.ENCOUNTER_EXPLICIT_HINT_SEC, `点破时刻应 ≥ ${C.ENCOUNTER_EXPLICIT_HINT_SEC} 秒，实际 ${taught}`)
+  assert.equal(sc.telemetry.ac01UnaidedSeconds(), null, '没击杀 ⇒ 无提示版本也未达成')
 })
 
 test('批 2：墨卒朝主角缓慢爬来，到跟前停下（不会挤到玩家身上）', () => {
@@ -234,7 +280,7 @@ test('批 2：墨卒朝主角缓慢爬来，到跟前停下（不会挤到玩家
   assert.ok(gap >= MOTE_STOP_DISTANCE - 0.6, `不该挤到玩家身上，实际间距 ${gap.toFixed(2)}m`)
 })
 
-test('批 2：60 秒没动作 → 石头开始发光，且**不弹文字**（设计 §7）', () => {
+test('批 2：60 秒没动作 → 石头**仍然**会发光（发光机制没被文字取代）', () => {
   const sc = new PrologueScene()
   learnThreeVerbs(sc)
   for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
@@ -247,7 +293,6 @@ test('批 2：60 秒没动作 → 石头开始发光，且**不弹文字**（设
   // 越过 60 秒
   for (let i = 0; i < 90; i++) sc.step(NO_INPUT)
   assert.equal(sc.glowBodyId(), sc.stone.id, '60 秒后石头应开始发光')
-  assert.equal(sc.hint(), null, '发光是**不弹文字**的提示')
 })
 
 test('批 2：玩家动手（牵上丝线）之后，发光提示永久熄灭', () => {
@@ -391,14 +436,16 @@ test('批 3：墨卒被击杀后，进入质量差段并给出轻陶罐（设计
   assert.ok(sc.telemetry.stageStartSec('massdiff') !== null, '埋点应记下段落切换')
 })
 
-test('批 3：质量差段**也是零文字提示**（设计 §7「这一幕不需要任何文字」）', () => {
+test('批 3（第 14 轮改）：质量差段**有话说**了 —— 明确告诉玩家"重的那根把你拉过去"', () => {
   const sc = new PrologueScene()
   toEncounter(sc)
   killMote(sc)
   for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
   assert.equal(sc.currentStage, 'massdiff')
-  assert.equal(sc.hint(), null)
-  assert.equal(sc.glowBodyId(), -1, '这段也没有发光提示——物理自己会说话')
+  assert.equal(sc.hint(), TEXTS.stepMassDiff)
+  assert.equal(sc.glowBodyId(), -1, '这段不需要发光提示——文字已经说清了')
+  const notes = sc.guidance().notes.join(' ')
+  assert.ok(notes.includes('梁柱') && notes.includes('轻陶罐'), `物体说明要覆盖两个对照物，实际：${notes}`)
 })
 
 test('批 3：**连梁柱 → 收丝 → 自己被拉了过去**（设计 §7 原文）', () => {
@@ -534,7 +581,7 @@ test('批 4：进入双丝段 → 解锁第二根丝、对岸墨卒入场（设�
   assert.equal(sc.world.ropeDisplay().length, 2, 'HUD 应显示 2 枚圆点')
   assert.equal(sc.mote2.removed, false, '对岸墨卒应入场')
   assert.ok(sc.mote2.pos.x > C.CHASM_RIGHT_X, '它应站在沟对面')
-  assert.equal(sc.hint(), null, '这一段同样没有文字提示')
+  assert.equal(sc.hint(), TEXTS.stepDual, '这一段要给出过沟的完整两步（第 14 轮：创始人要求教明白）')
 })
 
 /** 走到沟左沿并**站稳**（不是一路走出平台）。 */
@@ -592,9 +639,19 @@ function crossChasm(sc: PrologueScene): void {
   )
   assert.equal(sc.cleared, false, '**还在空中，不算过关**——过关要求"站到平台上"')
 
-  // 落地
+  // 落地。
+  //
+  // ⚠️ 收丝是把人**一路收到锚点边上**（第 14 轮起主角这一端只在收丝时吃弹簧力，
+  // 所以"贴着锚点停下来"是必然结果）。于是收到底之后人可能：
+  //   · 挂在吊桩**旁边** ⇒ 断丝直接落到平台；
+  //   · 或者被挤到吊桩**顶上**站着（实测两种都出现过，取决于接近角度）。
+  // 后者不是 bug，但**不能算过关**（过关要求站在平台上）——所以这里补一段"往前走"，
+  // 这也正是真人会做的事：发现自己站在一个小方块上，就往下走。
   sc.step(input({ cutRope: 1 }))
-  for (let i = 0; i < 400 && !sc.cleared; i++) sc.step(NO_INPUT)
+  for (let i = 0; i < 60; i++) sc.step(NO_INPUT)
+  for (let i = 0; i < 400 && !sc.cleared; i++) sc.step(input({ moveX: 1 }))
+  // 万一往右走是墙，再往回走一次（对岸平台在 21..32，桩在 27..29）
+  for (let i = 0; i < 400 && !sc.cleared; i++) sc.step(input({ moveX: -1 }))
 }
 
 test('✅ 批 4 过关（D-041）：走完设计路线、站上对岸平台 = 通关，敌人不必清空', () => {
@@ -650,6 +707,103 @@ test('批 4：深沟只能靠丝过——从沟左沿够不着对岸吊桩（一
     y: C.SWING_BEAM_CENTER_Y - C.SWING_BEAM_HALF_H,
   })
   assert.equal(sc.world.ropes[0]!.targetId, sc.swingBeam.id, '悬吊横梁必须够得着')
+})
+
+// ══════════════════════════════════════════════════════════
+//  第 14 轮实机反馈的回归
+// ══════════════════════════════════════════════════════════
+
+test('#1 陶罐**能附着**了（创始人：「丝线附着不上陶罐」）', () => {
+  const sc = new PrologueScene()
+  sc.player.pos = { x: sc.jar.pos.x - 3, y: C.PLAYER_HALF_H + 0.01 }
+  for (let i = 0; i < 10; i++) sc.step(NO_INPUT)
+
+  assert.equal(sc.jar.anchorable, true, '靶子陶罐必须可附着')
+  assert.equal(fire(sc, sc.jar.pos), true, '应该能连上它')
+  assert.equal(sc.world.ropes[0]!.targetId, sc.jar.id)
+})
+
+test('#2 陶罐**推不进沟里**（创始人：「墨卒移动会把陶罐推进沟里」）', () => {
+  const sc = new PrologueScene()
+  // 进遭遇战（墨卒入场）
+  fire(sc, sc.stone.pos)
+  sc.step(input({ reel: 'in' }))
+  sc.step(input({ cutRope: 0 }))
+  for (let i = 0; i < 70; i++) sc.step(NO_INPUT)
+  assert.equal(sc.currentStage, 'encounter')
+
+  // 玩家一路往右（这正是试玩时会做的事），墨卒会跟着，石块也会在地上滚
+  for (let i = 0; i < 60 * 30; i++) sc.step(input({ moveX: 1 }))
+
+  assert.ok(
+    Math.abs(sc.jar.pos.x - PROLOGUE.jarX) < 0.01,
+    `陶罐必须原地不动，实际 ${PROLOGUE.jarX} → ${sc.jar.pos.x.toFixed(2)}`,
+  )
+  assert.ok(sc.jar.pos.y > 0, `陶罐不该掉进沟里，实际 y=${sc.jar.pos.y.toFixed(2)}`)
+  assert.ok(
+    sc.mote.pos.x <= C.PROLOGUE_MOTE_LEDGE_GUARD_X + 0.05,
+    `墨卒也必须被护栏挡住（不许越过 ${C.PROLOGUE_MOTE_LEDGE_GUARD_X}），实际 ${sc.mote.pos.x.toFixed(2)}`,
+  )
+})
+
+test('#4 张力到顶只会**挡住**着地的主角，不会把他拽上天', () => {
+  const sc = new PrologueScene()
+  sc.skipTo('massdiff')
+  // 站到横梁左侧下方（横梁 x 4..14）
+  sc.player.pos = { x: 4, y: C.PLAYER_HALF_H + 0.01 }
+  for (let i = 0; i < 20; i++) sc.step(NO_INPUT)
+  assert.equal(fire(sc, { x: 4, y: C.BEAM_CENTER_Y - C.BEAM_HALF_H }), true)
+
+  // 一直往右走 3 秒
+  let maxY = sc.player.pos.y
+  let airborneFrames = 0
+  for (let i = 0; i < 180; i++) {
+    sc.step(input({ moveX: 1 }))
+    maxY = Math.max(maxY, sc.player.pos.y)
+    if (!sc.player.grounded) airborneFrames++
+  }
+
+  assert.ok(
+    maxY < 2,
+    `着地的主角不该被拽离地面（实测过一帧 +29 m/s 直接上天），实际最高 y=${maxY.toFixed(2)}`,
+  )
+  assert.ok(airborneFrames < 30, `最多短暂离地，实际离地 ${airborneFrames} 帧`)
+  assert.ok(
+    Math.abs(sc.player.pos.x - 4) < 8,
+    `应该被丝线挡在一个可达范围内，实际 x=${sc.player.pos.x.toFixed(2)}`,
+  )
+})
+
+test('#4 收丝**仍然**能把主角拉过去（"人物能被拉走的方式是收丝"）', () => {
+  const sc = new PrologueScene()
+  sc.skipTo('massdiff')
+  sc.player.pos = { x: 4, y: C.PLAYER_HALF_H + 0.01 }
+  for (let i = 0; i < 20; i++) sc.step(NO_INPUT)
+  fire(sc, { x: 4, y: C.BEAM_CENTER_Y - C.BEAM_HALF_H })
+
+  const y0 = sc.player.pos.y
+  for (let i = 0; i < 180; i++) sc.step(input({ reel: 'in' }))
+
+  assert.ok(
+    sc.player.pos.y > y0 + 2,
+    `收丝必须把主角拉离地面（这是质量差那一课的核心），实际 ${y0.toFixed(2)} → ${sc.player.pos.y.toFixed(2)}`,
+  )
+  assert.equal(sc.player.grounded, false)
+})
+
+test('掉进沟里的**物件**会被送回出生点（纯进度门控下，否则是死局）', () => {
+  const sc = new PrologueScene()
+  sc.skipTo('dual')
+  // 把石块扔进沟里
+  sc.stone.pos = { x: (C.CHASM_LEFT_X + C.CHASM_RIGHT_X) / 2, y: -5 }
+  sc.stone.vel = { x: 0, y: -10 }
+  sc.step(NO_INPUT)
+
+  assert.ok(
+    Math.abs(sc.stone.pos.x - PROLOGUE.stoneX) < 0.01,
+    `石块应被送回出生点 ${PROLOGUE.stoneX}，实际 ${sc.stone.pos.x.toFixed(2)}`,
+  )
+  assert.equal(sc.stone.pos.y > 0, true)
 })
 
 test('批 4：掉进沟里 → 软重生回沟边（R1 不做死亡，D-040）', () => {
