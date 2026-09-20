@@ -14,6 +14,7 @@
 import { Color, Graphics } from 'cc'
 import type { Body, Shape } from '../core/body'
 import {
+  DEATH_FADE_TICKS,
   M0_ROOM_H,
   PLAYER_HAND_OFFSET_Y,
   ROPE_LEN_MAX,
@@ -261,7 +262,7 @@ export class GrayboxRenderer {
    * 而创始人的诉求是"看得见伤害"—— 两者折中：平时只是淡淡的框，被打过才醒目。
    */
   private drawHpBar(g: Graphics, b: Body): void {
-    if (b.maxHp <= 0) return
+    if (b.maxHp <= 0 || b.fadeTicks > 0 || b.removed) return
     const SEG = 16
     const GAP = 3
     const n = Math.max(1, Math.round(b.maxHp))
@@ -313,7 +314,12 @@ export class GrayboxRenderer {
     for (const b of sc.world.bodies) {
       // 静态**道具**（序章那个推不动的陶罐靶子）也要按道具画，不能当地形。
       if (b.removed || (b.kind === 'static' && b.tag !== 'prop')) continue
-      const fill = colorOf(b)
+      // **死亡渐隐**（第 16 轮，创始人：「敌人击败后加渐变消失的效果，
+      // 不要尸体在原地挡路」）：alpha 随剩余 tick 线性衰减。
+      // 渐隐期间它已经不参与碰撞了（`detectContacts` 跳过），所以是"淡出的幻影"，不挡路。
+      const fade =
+        b.fadeTicks > 0 ? Math.max(0, Math.min(1, b.fadeTicks / DEATH_FADE_TICKS)) : 1
+      const fill = withAlpha(colorOf(b), fade)
 
       if (b.tag === 'player') {
         this.fillAabb(g, b.pos.x, b.pos.y, halfW(b.shape), halfH(b.shape), fill)
@@ -680,6 +686,12 @@ function groundGap(sc: PlayableScene): { left: number; right: number } | null {
 }
 
 export { tensionStyle }
+
+/** 半透明副本（死亡渐隐用）。每次调用都会 new 一个 Color —— 每帧只有几个刚体渐隐，可接受。 */
+function withAlpha(c: Color, k: number): Color {
+  if (k >= 1) return c
+  return new Color(c.r, c.g, c.b, Math.round(c.a * Math.max(0, k)))
+}
 
 /**
  * 刚体 → 灰盒颜色。**按 tag 与状态推导，不按名字硬编码** ——

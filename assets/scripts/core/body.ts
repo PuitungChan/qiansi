@@ -154,6 +154,16 @@ export interface Body {
   vulnerable: boolean
 
   /**
+   * 死亡后**渐隐**的剩余 tick（0 = 没有在渐隐）。
+   *
+   * 创始人原话：「敌人击败后加**渐变消失**的效果，**不要尸体在原地挡路**」。
+   * 所以敌人死后既不是立即消失（玩家看不到"它死了"），也不是留一具尸体
+   * （那会挡住走位），而是：**先渐隐、期间不参与任何碰撞、隐完置 `removed`**。
+   * 纯 tick 倒计时 ⇒ 仍然确定性（AC-05）。
+   */
+  fadeTicks: number
+
+  /**
    * 已被移出世界（碎裂、消散）。`detectContacts` 与渲染层都会跳过它。
    * 用布尔标记而不是从 `bodies` 数组里删元素 —— **数组下标就是刚体 id**，
    * 一删就会让 id 错位，确定性直接崩掉。
@@ -226,6 +236,7 @@ export function createBody(init: BodyInit): Body {
     shattersOnDeath: init.shattersOnDeath ?? false,
     fragile: init.fragile ?? false,
     vulnerable: init.vulnerable ?? false,
+    fadeTicks: 0,
     removed: false,
     momentum: { x: 0, y: 0 },
     kineticEnergy: 0,

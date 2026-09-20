@@ -895,13 +895,73 @@ test('#3 地形加厚：高速砸下去不会把墨卒砸穿到地面以下', ()
     const m = sc.mote
     sc.stone.pos = { x: m.pos.x - 0.3, y: m.pos.y + 1 }
     sc.stone.vel = { x: 4 + trial * 4, y: -10 - trial * 4 }
-    for (let i = 0; i < 300; i++) sc.step(NO_INPUT)
-    worst = Math.min(worst, sc.mote.pos.y)
+    for (let i = 0; i < 300; i++) {
+      sc.step(NO_INPUT)
+      // 只统计**活着的时候**：死后它会渐隐并被移出世界，位置就冻结了不算穿模
+      if (sc.mote.alive) worst = Math.min(worst, sc.mote.pos.y)
+    }
   }
   assert.ok(
     worst > -0.5,
-    `墨卒不该掉到地面以下（地面顶面 y=0，地形厚度 ${C.TERRAIN_HALF_H * 2}m 就是为了防这个），实际最低 y=${worst.toFixed(2)}`,
+    `墨卒活着的时候不该掉到地面以下（地面顶面 y=0，地形厚度 ${C.TERRAIN_HALF_H * 2}m 就是防这个），实际最低 y=${worst.toFixed(2)}`,
   )
+})
+
+test('#1 敌人死后**渐隐 + 移出世界**，不留尸体挡路（第 16 轮）', () => {
+  const sc = new PrologueScene()
+  sc.skipTo('encounter')
+  sc.player.pos = { x: 4, y: C.PLAYER_HALF_H + 0.01 }
+  for (let i = 0; i < 10; i++) sc.step(NO_INPUT)
+  sc.stone.pos = { x: sc.mote.pos.x - 2, y: 0.5 }
+  sc.stone.vel = { x: 20, y: 0 }
+  for (let i = 0; i < 120 && sc.mote.alive; i++) sc.step(NO_INPUT)
+  assert.equal(sc.mote.alive, false, '先打死它')
+
+  // 刚死：在渐隐（还看得见，但不该再参与碰撞）
+  assert.ok(sc.mote.fadeTicks > 0, `死后应该有一段渐隐，实际 fadeTicks=${sc.mote.fadeTicks}`)
+  assert.equal(sc.mote.removed, false, '渐隐期间还没消失——玩家要看得见"它死了"')
+  // 渐隐期间不挡路：把玩家挪到它身上，两者之间不该有接触
+  sc.player.pos = { x: sc.mote.pos.x, y: C.PLAYER_HALF_H + 0.01 }
+  sc.step(NO_INPUT)
+  assert.ok(
+    sc.world.contacts.every((c) => c.a !== sc.mote && c.b !== sc.mote),
+    '渐隐中的尸体不该产生任何接触（否则还是会挡路）',
+  )
+
+  // 渐隐结束：从世界里移出，位置冻结（不再下落，否则会把哈希推成 NaN）
+  for (let i = 0; i < C.DEATH_FADE_TICKS + 5; i++) sc.step(NO_INPUT)
+  assert.equal(sc.mote.removed, true, '渐隐结束就该移出世界')
+  const frozen = { ...sc.mote.pos }
+  for (let i = 0; i < 120; i++) sc.step(NO_INPUT)
+  assert.deepEqual(sc.mote.pos, frozen, '移出世界之后位置必须冻结（继续积分会永远下落）')
+})
+
+test('#5 主角**撞**敌人不造成伤害（只有甩出去的东西才算攻击）', () => {
+  const sc = new PrologueScene()
+  sc.skipTo('encounter')
+  // 走到墨卒左边，然后一路撞过去
+  sc.player.pos = { x: sc.mote.pos.x - 3, y: C.PLAYER_HALF_H + 0.01 }
+  for (let i = 0; i < 10; i++) sc.step(NO_INPUT)
+  const hp0 = sc.mote.hp
+  assert.equal(hp0, C.MOTE_HP)
+
+  for (let i = 0; i < 240; i++) sc.step(input({ moveX: 1 }))
+  assert.equal(
+    sc.mote.hp,
+    hp0,
+    `撞上去不该掉血（主角质量 0.5，设计 §2.4「不产生力量」），实际 ${hp0} → ${sc.mote.hp}`,
+  )
+  assert.equal(sc.mote.alive, true, '更不该被撞死')
+
+  // 但**甩出去的石头**当然还算攻击（对照组）
+  const sc2 = new PrologueScene()
+  sc2.skipTo('encounter')
+  sc2.player.pos = { x: 4, y: C.PLAYER_HALF_H + 0.01 }
+  for (let i = 0; i < 10; i++) sc2.step(NO_INPUT)
+  sc2.stone.pos = { x: sc2.mote.pos.x - 2, y: 0.5 }
+  sc2.stone.vel = { x: 20, y: 0 }
+  for (let i = 0; i < 120; i++) sc2.step(NO_INPUT)
+  assert.equal(sc2.mote.alive, false, '石头砸上去还是要能打死（对照）')
 })
 
 test('#4 收丝的拉力有上限：不会把人"弹射"出去（第 15 轮）', () => {

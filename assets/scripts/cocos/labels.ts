@@ -91,7 +91,8 @@ export function labelSpecs(sc: PlayableScene, opts: LabelOptions): LabelSpec[] {
 
     // 敌人：名字下面再挂一行**血量数字**（第 14 轮，创始人要求"清楚的看到砸了多少血量"）。
     // 分段的血条画在 Graphics 上（Graphics 画不了字），数字在这里。
-    if (b.tag === 'enemy' && b.maxHp > 0) {
+    // 死亡渐隐期间不再显示（那时候血量已经没有意义了）。
+    if (b.tag === 'enemy' && b.maxHp > 0 && b.alive && b.fadeTicks <= 0) {
       const hurt = b.hp < b.maxHp
       out.push({
         key: `hp:${b.id}`,

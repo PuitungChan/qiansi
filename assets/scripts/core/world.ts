@@ -235,6 +235,7 @@ export class World {
     this.solveVelocities()
     this.updateGrounded()
     this.updateIgnoreFlags()
+    this.stepFades()
     for (const b of this.bodies) refreshDerived(b)
     this.stepChains(p)
   }
@@ -644,7 +645,11 @@ export class World {
   private integrateVelocities(): void {
     for (let i = 0; i < this.bodies.length; i++) {
       const b = this.bodies[i]
-      if (b.kind === 'static' || b.invMass === 0) continue
+      // **`removed` 的刚体完全退出模拟**（第 16 轮修）：它已经不参与碰撞了，
+      // 但如果还继续积分，它就会**穿过地形永远下落**（y → −∞），
+      // 最终把状态哈希推成 NaN —— AC-05 直接崩。实测：死掉的墨卒在 removed 之后
+      // 一路掉到 y = −266 还在掉。
+      if (b.kind === 'static' || b.invMass === 0 || b.removed) continue
       b.vel = {
         x: b.vel.x + this.fx[i] * b.invMass * C.DT,
         y: b.vel.y + this.fy[i] * b.invMass * C.DT,
@@ -654,7 +659,7 @@ export class World {
 
   private integratePositions(): void {
     for (const b of this.bodies) {
-      if (b.kind === 'static') continue
+      if (b.kind === 'static' || b.removed) continue
       b.pos = { x: b.pos.x + b.vel.x * C.DT, y: b.pos.y + b.vel.y * C.DT }
     }
   }
@@ -678,7 +683,7 @@ export class World {
       if (a.removed) continue
       for (let j = i + 1; j < n; j++) {
         const b = this.bodies[j]
-        if (b.removed) continue
+        if (b.removed || b.fadeTicks > 0) continue
 
         if (a.tag === 'player' || b.tag === 'player') {
           const other = a.tag === 'player' ? b : a
@@ -769,6 +774,18 @@ export class World {
     if (target === null || attacker === null) return
     if (attacker.kind === 'static') return
 
+    // ── 门槛 ⓪：**主角的身体不是武器**（第 16 轮实机反馈）──────────────
+    //
+    // 创始人报的 bug：「现在玩家**一定速度撞向敌人也会对敌人造成伤害**」。
+    // 根因是 `vulnerable`（教学敌人不做门槛判定）把原来挡住主角的那道
+    // `m_eff = min(0.5, 1) = 0.5 < 3` 也一起绕过去了 —— 而主角走速 6 m/s
+    // 正好等于 `MIN_DAMAGE_SPEED`，于是一路走过去就把墨卒撞死了。
+    //
+    // 设计 §2.4 写得很清楚：「主角质量 0.5，**不产生力量**」——
+    // 伤害必须来自**甩出去的东西**（石块）或环境（"无丝"）。
+    // 所以在这里一刀切掉：攻击者是主角 ⇒ 不结算伤害（碰撞本身照旧，走路撞上去只是被挡）。
+    if (attacker.tag === 'player') return
+
     // ── 门槛 ①：**还牵在手上的东西不造成伤害**（D-037）──────────────
     //
     // 设计 §2.3 原文：「**断丝 = 攻击。**」——攻击动作本身就是"松手"。
@@ -813,9 +830,25 @@ export class World {
     if (target.hp <= 0) {
       target.hp = 0
       target.alive = false
-      // 易碎场景物（陶罐等）当场碎裂消失；敌人留在场上（M1 只标记不播死亡流程）
+      // 易碎场景物（陶罐等）当场碎裂消失；
+      // **敌人渐隐之后消失**（第 16 轮创始人要求：「敌人击败后加渐变消失的效果，
+      // 不要尸体在原地挡路」）—— 渐隐期间它不参与任何碰撞（见 detectContacts），
+      // 所以不会挡路，但玩家能看到"它死了"。
       if (target.shattersOnDeath) target.removed = true
+      else if (!target.removed) target.fadeTicks = C.DEATH_FADE_TICKS
       this.events.push({ kind: 'killed', target: target.id, by: attacker.id, at })
+    }
+  }
+
+  /** 推进"死亡渐隐"计时；隐完就置 `removed`（从碰撞与渲染里一起消失）。 */
+  private stepFades(): void {
+    for (const b of this.bodies) {
+      if (b.fadeTicks <= 0) continue
+      b.fadeTicks--
+      if (b.fadeTicks <= 0) {
+        b.fadeTicks = 0
+        b.removed = true
+      }
     }
   }
 
