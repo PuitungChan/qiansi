@@ -109,4 +109,93 @@ for (const f of walk(join(root, 'assets/scripts/cocos'))) {
 }
 console.log(`漏导入检查：cocos/ 共 ${walk(join(root, 'assets/scripts/cocos')).length} 个文件，${missingImports} 处`)
 
-process.exit(failures + violations + missingImports === 0 ? 0 : 1)
+// ── 导入了**不存在的名字**（第 20 轮加：真的踩过一次）────────────────
+//
+// 第 15 轮加的是"用了没导入"；这一条是它的**镜像**："导入了但对面没导出"。
+// 两者都是**语法合法、运行时才炸**的东西：
+//   · 前者 → `ReferenceError: X is not defined`
+//   · 后者 → `SyntaxError: The requested module './x' does not provide an export named 'Y'`
+//
+// 真实事故（第 20 轮）：`core/enemies.ts` 写了 `import { normalize } from './vec2'`，
+// 而那个文件导出的名字是 **`norm`**。语法检查通过、漏导入检查通过，
+// 直到测试跑到 import 那一刻才炸 —— 而且报错信息里**没有出现 enemies.ts**，
+// 只有一句 "module './vec2' does not provide an export named 'normalize'"，
+// 定位成本全在那句"哪个文件写的"上。
+//
+// 做法：对本仓库内所有 .ts，取出 `import { … } from './x'` 的每个名字，
+// 到目标文件里核对它是否被导出。**宁可不报也不误报**：
+//   · 目标文件里有 `export *` ⇒ 跳过（无法静态枚举）
+//   · 非相对路径（第三方包）⇒ 跳过
+//   · `import * as ns` / 默认导入 ⇒ 跳过
+function exportsOf(src) {
+  const out = new Set()
+  // export const/let/var/function/class/interface/type/enum/abstract class
+  {
+    const re =
+      /^\s*export\s+(?:declare\s+)?(?:abstract\s+)?(?:const|let|var|function|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm
+    let m
+    while ((m = re.exec(src)) !== null) out.add(m[1])
+  }
+  // export { a, b as c }
+  {
+    const re = /^\s*export\s*\{([^}]*)\}/gm
+    let m
+    while ((m = re.exec(src)) !== null) {
+      for (const part of m[1].split(',')) {
+        const raw = part.trim()
+        if (raw.length === 0) continue
+        const name = raw.split(/\s+as\s+/).pop()?.trim()
+        if (name) out.add(name)
+      }
+    }
+  }
+  return out
+}
+
+const allTs = [...walk(join(root, 'assets')), ...walk(join(root, 'tests')), ...walk(join(root, 'scripts'))]
+let badImports = 0
+for (const f of allTs) {
+  const src = readFileSync(f, 'utf8')
+  const re = /import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+['"](\.[^'"]+)['"]/g
+  let m
+  while ((m = re.exec(src)) !== null) {
+    const names = m[1]
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0 && !p.startsWith('type '))
+      .map((p) => p.split(/\s+as\s+/)[0]?.trim())
+      .filter(Boolean)
+    if (names.length === 0) continue
+
+    const target = resolveTs(join(dirname(f), m[2]))
+    if (target === null) continue
+    const targetSrc = readFileSync(target, 'utf8')
+    if (/^\s*export\s+\*/m.test(targetSrc)) continue // 无法静态枚举，宁可不报
+    const avail = exportsOf(targetSrc)
+
+    for (const name of names) {
+      if (avail.has(name)) continue
+      badImports++
+      console.error(
+        `✗ 导入不存在: ${relative(root, f)} 从 ${m[2]} 导入了 ${name}，` +
+          `但 ${relative(root, target)} 没有导出这个名字` +
+          (avail.size > 0 ? `（它导出的是：${[...avail].slice(0, 12).join(', ')}${avail.size > 12 ? ' …' : ''}）` : ''),
+      )
+    }
+  }
+}
+console.log(`导入存在性检查：${allTs.length} 个 .ts 文件，${badImports} 处不存在的导入`)
+
+/** 把 `./x` 解析成实际文件（补 .ts / /index.ts）。找不到就返回 null。 */
+function resolveTs(base) {
+  for (const cand of [base, `${base}.ts`, join(base, 'index.ts')]) {
+    try {
+      if (statSync(cand).isFile()) return cand
+    } catch {
+      // 不存在，继续试下一个
+    }
+  }
+  return null
+}
+
+process.exit(failures + violations + missingImports + badImports === 0 ? 0 : 1)

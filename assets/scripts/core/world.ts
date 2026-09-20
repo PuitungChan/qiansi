@@ -40,6 +40,15 @@ import {
 import { type Contact, boundsOverlap, closestPointOnShape, collide, distanceToShape } from './collide'
 import * as C from './constants'
 import { type DamageResult, resolveImpactAgainst } from './damage'
+import {
+  type EnemyHost,
+  hitCore,
+  isInkDot,
+  isNest,
+  releaseEntangle,
+  ropeIsEntangled,
+  stepEnemies,
+} from './enemies'
 import type { SimEvent } from './events'
 import { hashFloat64Wide } from './hash'
 import { type InputFrame, sanitizeMoveX } from './input'
@@ -128,6 +137,19 @@ export class World {
    */
   unlockedRopes: number
 
+  /**
+   * **视野污染**（FR-CBT-012 / D-065）：0 = 全屏可见，1 = 污染到下限。
+   *
+   * 墨巢射出的墨点命中主角时上升，之后**缓慢自愈**（`INK_POLLUTION_DECAY_PER_SEC`）。
+   * 渲染层用它算遮罩；`visibleRatio()` 把"污染量"翻译成"还能看见多少"。
+   *
+   * 为什么把这个状态放在**内核**而不是渲染层：
+   * ① 它会随 tick 演化 ⇒ 必须确定性（AC-05）；
+   * ② 它是**玩法状态**（决定玩家还能看见多少信息），不是画面效果 ——
+   *    如果它在渲染层，回放就没法复现"当时屏幕上有多黑"。
+   */
+  inkPollution = 0
+
   private fx: Float64Array
   private fy: Float64Array
   private cap: number
@@ -167,6 +189,31 @@ export class World {
     return b
   }
 
+  /**
+   * 收编一个**已经造好的**刚体（第 20 轮）。
+   *
+   * 存在的理由：敌人的参数（质量/弱点/HP/巡逻带/承重点）应当只有**一个**定义处，
+   * 那个定义处是 `core/enemies.ts` 的工厂（`createBlade` / `createBind` / `createNest` /
+   * `createInkDot`）。如果场景改用 `addBody({...})` 一字排开，同一套参数就会有两份，
+   * 迟早有一份忘了改 —— 而这类"两处定义、一处漏改"的 bug 我这个项目已经踩过两次
+   * （第 18 轮的回放头部格式、第 19 轮的 RTM 与 SRS 计数）。
+   *
+   * 只允许在**构造期**使用（id 必须等于当前数组长度，与 `addBody` 同一条铁律）。
+   */
+  adoptBody(b: Body): Body {
+    const id = this.bodies.length
+    if (b.id !== id) {
+      throw new Error(`收编的刚体 id 必须等于其数组下标：期望 ${id}，收到 ${b.id}`)
+    }
+    this.bodies.push(b)
+    if (this.bodies.length > this.cap) {
+      this.cap = Math.max(16, this.bodies.length * 2)
+      this.fx = new Float64Array(this.cap)
+      this.fy = new Float64Array(this.cap)
+    }
+    return b
+  }
+
   setPlayer(b: Body): void {
     this.playerId = b.id
   }
@@ -175,6 +222,17 @@ export class World {
     const p = this.bodies[this.playerId]
     if (p === undefined) throw new Error('World.setPlayer() 尚未调用')
     return p
+  }
+
+  /**
+   * 重力加速度（带符号，向下为负）。
+   *
+   * 为什么要有这个 getter：`EnemyHost` 接口需要它（墨巢要解抛体角度才能打中玩家），
+   * 而 `gravityY` 藏在 `config` 里。少了它，`enemies.ts` 的运行期宿主自检会当场报错 ——
+   * 事实上它就是这么被抓到的。
+   */
+  get gravityY(): number {
+    return this.config.gravityY
   }
 
   bodyById(id: number): Body | null {
@@ -212,6 +270,10 @@ export class World {
     this.tick++
 
     this.tickTimers()
+    // 敌人行为**在物理积分之前**：它们只改自己的速度与倒计时，
+    // 让同一 tick 的积分把新速度算进去（否则墨刃会慢一帧）。
+    stepEnemies(this)
+    this.stepPollution()
     const p = this.player
     this.applyPlayerControl(input, p)
     this.applyRopeCommands(input, p)
@@ -236,11 +298,90 @@ export class World {
     this.updateGrounded()
     this.updateIgnoreFlags()
     this.stepFades()
+    this.clearPollutionWhenNestsCleared()
     for (const b of this.bodies) refreshDerived(b)
     this.stepChains(p)
   }
 
+  // ── 敌人层需要的能力（`EnemyHost`）──────────────────
+  //
+  // `core/enemies.ts` 刻意**不 import World**（避免循环依赖，也让那层能独立单测）。
+  // 它只依赖一个结构化接口，下面这几个方法就是那个接口的实现。
+
+  /**
+   * 从墨点池里取一枚休眠墨点，放到 `from` 并以 `vel` 飞出去。
+   *
+   * **池子空了就返回 false**（巢会等下一拍再试）—— 绝不新建刚体：
+   * `bodies` 数组下标就是刚体 id，长度必须全程不变（`tests/perf.test.ts` 守着它）。
+   */
+  spawnInkDot(from: Vec2, vel: Vec2): boolean {
+    for (const b of this.bodies) {
+      if (!isInkDot(b) || !b.removed) continue
+      b.removed = false
+      b.alive = true
+      b.pos = { x: from.x, y: from.y }
+      b.vel = { x: vel.x, y: vel.y }
+      b.grounded = false
+      b.dotLife = C.INK_DOT_LIFE_SEC
+      b.ignorePlayer = true
+      return true
+    }
+    return false
+  }
+
+  /** 事件出口（敌人层发事件用）。 */
+  pushEvent(kind: string, detail: Record<string, unknown>): void {
+    this.events.push({ kind, ...detail } as SimEvent)
+  }
+
   // ── 1. 计时器 ───────────────────────────────────────
+
+  /**
+   * 视野污染的自愈与钳制（FR-CBT-012）。
+   *
+   * 三条规则：
+   * ① 每 tick 按 `INK_POLLUTION_DECAY_PER_SEC` 回落 —— 失误可恢复，
+   *    不会因为开局被打中两发就永久残废；
+   * ② 钳到 `[0, 1 - INK_MIN_VISIBLE]`：**污染到顶也只遮掉 65% 视野**，
+   *    至少留 35% —— 否则是"没法玩"，而不是"难受"（D-065 ②）；
+   * ③ 墨巢死光时由 `clearPollutionFromNests()` 直接清零（创始人明确要求的那条）。
+   */
+  private stepPollution(): void {
+    if (this.inkPollution > 0) {
+      this.inkPollution -= C.INK_POLLUTION_DECAY_PER_SEC * C.DT
+      if (this.inkPollution < 0) this.inkPollution = 0
+    }
+    const max = 1 - C.INK_MIN_VISIBLE
+    if (this.inkPollution > max) this.inkPollution = max
+  }
+
+  /** 还能看见多少（0.35..1）。渲染层直接用这个数当"清晰区域的半径比例"。 */
+  visibleRatio(): number {
+    return 1 - this.inkPollution
+  }
+
+  /** 加污染（墨点命中时调用）。 */
+  addPollution(amount: number): void {
+    if (!(amount > 0)) return
+    this.inkPollution += amount
+    const max = 1 - C.INK_MIN_VISIBLE
+    if (this.inkPollution > max) this.inkPollution = max
+  }
+
+  /**
+   * 全部墨巢都死了 ⇒ 污染清零（创始人原话：「直到击败墨巢恢复全屏可见」）。
+   *
+   * 每 tick 检查一次（代价是遍历一遍 bodies，几十个元素，可忽略）。
+   * 用"还有活着的巢吗"而不是"某只巢刚死"来判定：这样即使将来一关有多个巢，
+   * 规则也仍然是"清完才恢复"，不需要额外状态。
+   */
+  private clearPollutionWhenNestsCleared(): void {
+    if (this.inkPollution <= 0) return
+    for (const b of this.bodies) {
+      if (isNest(b) && !b.removed && b.alive) return
+    }
+    this.inkPollution = 0
+  }
 
   private tickTimers(): void {
     if (this.stunRemaining > 0) {
@@ -316,6 +457,9 @@ export class World {
       this.reeledInThisTick = false
       for (const r of this.ropes) {
         if (r.state !== 'attached') continue
+        // **被墨缚缠住的丝收不动也放不动**（但可以断 —— 断的路径在上面，不经过这里）。
+        // D-065 ③ 的推荐项：惩罚是"这段时间少一根丝"，解是"按断"，教的是资源管理。
+        if (ropeIsEntangled(this, r.index)) continue
         if (input.reel === 'in') {
           const next = clampRopeLength(r.targetLength - step)
           if (next < r.targetLength) this.reeledInThisTick = true
@@ -465,6 +609,10 @@ export class World {
     // 等两者分开后自动恢复碰撞。见 Body.ignorePlayer。
     const target = this.bodyById(targetId)
     if (target !== null) target.ignorePlayer = true
+
+    // 丝没了，缠在它上面的触须就该松 —— 否则墨缚会抱着一个不存在的丝位直到超时，
+    // 表现为"它明明没缠着任何东西却不来缠你"。
+    releaseEntangle(this, r.index)
 
     if (reason === 'cut') {
       this.events.push({ kind: 'rope-cut', rope: r.index, target: targetId })
@@ -808,13 +956,24 @@ export class World {
     // 而实测玩家朝目标方向的正常甩投是 15~16 m/s（且只有约 2/3 的手法能做到），
     // 于是"砸碎陶罐"这第一课时灵时不灵。它本来就是我定的"可破坏场景物"（D-044），
     // 耐久口径也由我定：**砸到就碎**。
+    // **承重点**（第 20 轮 / FR-CBT-012）：撞击点是否落在目标身上的承重点小圆内。
+    // 目前只有墨巢用它（`weakness: 'structure'`，打中承重点 ×3、打别处 0）。
+    // 判定用**接触点**而不是"攻击物的位置"：接触点才是"砸在哪儿"的那个点。
+    const coreHit = hitCore(target, at)
+
     const res: DamageResult = target.fragile
       ? { type: 'impact', amount: Math.max(target.hp, 1), effective: true }
       : target.vulnerable
         ? // 易伤目标：只保留"撞上了没有"（MIN_DAMAGE_SPEED）这一道，按切割公式结算。
           // 见 Body.vulnerable —— 教学敌人不该出现"看着打中了却不掉血"的死区。
           { type: 'cut', amount: (speed * speed) / C.CUT_DIVISOR, effective: true }
-        : resolveImpactAgainst(attacker.damageMass, target.damageMass, target.weakness, speed)
+        : resolveImpactAgainst(
+            attacker.damageMass,
+            target.damageMass,
+            target.weakness,
+            speed,
+            coreHit,
+          )
     if (!res.effective || res.amount <= 0) return
 
     target.hp -= res.amount
@@ -1050,7 +1209,14 @@ export class World {
 
   /** 参与哈希的全部状态量，顺序固定。 */
   stateValues(): number[] {
-    const out: number[] = [this.tick, this.stunRemaining, this.unlockedRopes]
+    const out: number[] = [
+      this.tick,
+      this.stunRemaining,
+      this.unlockedRopes,
+      // 视野污染（FR-CBT-012）：它是**玩法状态**，必须进哈希 ——
+      // 否则"回放到第 300 帧时屏幕上有多黑"无法复现（AC-05）。
+      this.inkPollution,
+    ]
     for (const b of this.bodies) {
       out.push(
         b.pos.x,
@@ -1062,6 +1228,13 @@ export class World {
         b.alive ? 1 : 0,
         b.ignorePlayer ? 1 : 0,
         b.removed ? 1 : 0,
+        // 敌人行为状态（第 20 轮）：被缠的丝位 / 缠绕剩余 / 缠绕冷却 / 开火冷却 / 墨点寿命。
+        // 少一个都会让"回放的某一帧开始分叉"变得无法解释。
+        b.entangleRope,
+        b.entangleRemaining,
+        b.entangleCooldown,
+        b.fireCooldown,
+        b.dotLife,
       )
     }
     for (const r of this.ropes) {

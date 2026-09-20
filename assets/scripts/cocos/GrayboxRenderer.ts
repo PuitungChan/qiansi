@@ -75,6 +75,34 @@ const C = {
   panelText: new Color(220, 220, 220, 255),
   predict: new Color(232, 196, 106, 255),
   flying: new Color(232, 196, 106, 190),
+  // ── 三类敌人（第 20 轮 / FR-CBT-011）────────────────
+  //
+  // 配色原则：**都在墨色系里，但明度差得开** —— 灰盒阶段玩家要能一眼分辨
+  // "哪个是哪种敌人"，而"它们都是墨"这件事又要看得出来。
+  /** 墨刃：极薄的一片，最亮、最冷（"快的"读起来是亮的） */
+  blade: new Color(178, 192, 208, 255),
+  bladeEdge: new Color(214, 228, 240, 210),
+  /** 墨缚：藤蔓，偏紫，最高最窄 */
+  bind: new Color(120, 88, 128, 255),
+  bindEdge: new Color(178, 140, 186, 230),
+  /** 触须：缠住丝线时画的那条线 */
+  tentacle: new Color(196, 150, 200, 235),
+  /** 墨巢：静态结构，暗且大 */
+  nest: new Color(66, 58, 74, 255),
+  nestEdge: new Color(120, 104, 132, 220),
+  /** 承重点：唯一的"要打这里"提示，暖色小圆 */
+  nestCore: new Color(236, 196, 108, 235),
+  /** 墨点：小而黑的东西，带一圈更黑的边 */
+  inkDot: new Color(28, 24, 34, 255),
+  inkDotEdge: new Color(92, 78, 104, 220),
+  /**
+   * 视野污染遮罩：纯黑，透明度由污染量决定。
+   *
+   * 它**不是全屏变暗**（那样只会让画面难看），而是**从画面边缘向内的黑环**——
+   * 与设计 §8.4 给主角受伤定的"墨蚀"是同一套视觉语言：
+   * 玩家一眼读作"我被打中了"，而不是"亮度调低了"。
+   */
+  pollution: new Color(4, 4, 6, 255),
 } as const
 
 /** 张力四档配色（设计 §2.4）。返回 [颜色, 抖动像素]。 */
@@ -119,6 +147,13 @@ export class GrayboxRenderer {
     this.drawRopes(g, sc)
     if (opts.aimPoint !== null) this.drawAim(g, sc, opts.aimPoint)
     if (opts.showPrediction) this.drawPrediction(g, sc, opts.prediction)
+    // **污染遮罩画在"世界之上、HUD 之下"**（第 20 轮 / FR-CBT-012）。
+    //
+    // 顺序是有意的取舍：它遮的是**世界**（地形、敌人、丝线）——
+    // 也就是"你还能看见多少战场信息"，这正是墨点攻击要剥夺的东西；
+    // 而按钮与丝位指示属于**操作界面**，被墨糊住会让人以为游戏卡了。
+    // 所以：世界 → 遮罩 → HUD。记在 D-066。
+    this.drawPollution(g, sc)
     this.drawHud(g, sc, opts)
   }
 
@@ -312,8 +347,9 @@ export class GrayboxRenderer {
    */
   private drawBodies(g: Graphics, sc: PlayableScene): void {
     for (const b of sc.world.bodies) {
-      // 静态**道具**（序章那个推不动的陶罐靶子）也要按道具画，不能当地形。
-      if (b.removed || (b.kind === 'static' && b.tag !== 'prop')) continue
+      // 静态**道具**（序章那个推不动的陶罐靶子）与**静态敌人**（墨巢）也要画出来，
+      // 不能当地形跳过 —— 第 20 轮加了墨巢之后这条判断必须放宽，否则它整座是隐形的。
+      if (b.removed || (b.kind === 'static' && b.tag !== 'prop' && b.tag !== 'enemy')) continue
       // **死亡渐隐**（第 16 轮，创始人：「敌人击败后加渐变消失的效果，
       // 不要尸体在原地挡路」）：alpha 随剩余 tick 线性衰减。
       // 渐隐期间它已经不参与碰撞了（`detectContacts` 跳过），所以是"淡出的幻影"，不挡路。
@@ -384,6 +420,126 @@ export class GrayboxRenderer {
       }
 
       this.fillAabb(g, b.pos.x, b.pos.y, b.shape.hw, b.shape.hh, fill)
+
+      // ── 三类敌人的"长相"（第 20 轮）───────────────────
+      //
+      // 灰盒阶段**不做美术，但必须能分辨**：形状 + 一两笔特征就够了，
+      // 目标是"我一眼知道那是哪种，以及它现在在做什么"。
+      if (b.name === 'blade') {
+        // 墨刃：一条亮边 + 拖尾（拖尾方向由速度决定，静止时不画）
+        const hw = b.shape.kind === 'aabb' ? b.shape.hw : halfW(b.shape)
+        const hh = b.shape.kind === 'aabb' ? b.shape.hh : halfH(b.shape)
+        this.strokeAabb(g, b.pos.x, b.pos.y, hw, hh, withAlpha(C.bladeEdge, fade))
+        const vx = b.vel.x
+        if (Math.abs(vx) > 0.5) {
+          const tail = Math.min(1.2, Math.abs(vx) * 0.09)
+          const from = worldToLocal({ x: b.pos.x - Math.sign(vx) * hw, y: b.pos.y })
+          const to = worldToLocal({ x: b.pos.x - Math.sign(vx) * (hw + tail), y: b.pos.y })
+          g.lineWidth = Math.max(1, metersToPx(hh) * 1.4)
+          g.strokeColor = withAlpha(C.blade, fade * 0.5)
+          g.moveTo(from.x, from.y)
+          g.lineTo(to.x, to.y)
+          g.stroke()
+        }
+      } else if (b.name === 'bind') {
+        // 墨缚：高窄的身体 + 顶部两条短触须；被缠住时画一条拉向丝线的长触须
+        const hh = b.shape.kind === 'aabb' ? b.shape.hh : halfH(b.shape)
+        this.strokeAabb(g, b.pos.x, b.pos.y, halfW(b.shape), hh, withAlpha(C.bindEdge, fade))
+        const top = b.pos.y + hh
+        for (const s of [-1, 1]) {
+          const a = worldToLocal({ x: b.pos.x, y: top })
+          const t = worldToLocal({ x: b.pos.x + s * 0.34, y: top + 0.3 })
+          g.lineWidth = 2
+          g.strokeColor = withAlpha(C.tentacle, fade)
+          g.moveTo(a.x, a.y)
+          g.lineTo(t.x, t.y)
+          g.stroke()
+        }
+        // 缠绕中：触须真的拉到那根丝的锚点上 —— 这是"我的丝被抓住了"的唯一可读反馈
+        if (b.entangleRope >= 0 && b.entangleRemaining > 0) {
+          const r = sc.world.ropes[b.entangleRope]
+          const target = r === undefined ? null : sc.world.bodies[r.targetId]
+          if (r !== undefined && target !== undefined) {
+            const a = worldToLocal({ x: b.pos.x, y: top })
+            const anchor = {
+              x: target.pos.x + r.anchorOffset.x,
+              y: target.pos.y + r.anchorOffset.y,
+            }
+            const t = worldToLocal(anchor)
+            g.lineWidth = 3
+            g.strokeColor = C.tentacle
+            g.moveTo(a.x, a.y)
+            g.lineTo(t.x, t.y)
+            g.stroke()
+          }
+        }
+      } else if (b.name === 'nest') {
+        // 墨巢：静态结构 + **承重点**（唯一"要打这里"的提示）
+        for (const s of [-1, 1]) {
+          const a = worldToLocal({ x: b.pos.x + s * halfW(b.shape), y: b.pos.y - halfH(b.shape) })
+          const t = worldToLocal({ x: b.pos.x + s * halfW(b.shape) * 1.5, y: b.pos.y - halfH(b.shape) - 0.25 })
+          g.lineWidth = 3
+          g.strokeColor = withAlpha(C.nestEdge, fade)
+          g.moveTo(a.x, a.y)
+          g.lineTo(t.x, t.y)
+          g.stroke()
+        }
+        const core = worldToLocal({
+          x: b.pos.x + b.coreOffset.x,
+          y: b.pos.y + b.coreOffset.y,
+        })
+        g.lineWidth = 2
+        g.strokeColor = withAlpha(C.nestCore, fade)
+        g.fillColor = withAlpha(C.nestCore, fade * 0.35)
+        g.circle(core.x, core.y, metersToPx(b.coreRadius))
+        g.fill()
+        g.stroke()
+        this.drawHpBar(g, b)
+      } else if (b.name.startsWith('ink-dot')) {
+        // 墨点：小黑点 + 一圈更黑的边（它是"打过来的东西"，不是道具）
+        const c = worldToLocal(b.pos)
+        const rad = b.shape.kind === 'circle' ? metersToPx(b.shape.radius) : 6
+        g.lineWidth = 2
+        g.strokeColor = C.inkDotEdge
+        g.circle(c.x, c.y, rad + 2)
+        g.stroke()
+      }
+    }
+  }
+
+  /**
+   * **视野污染遮罩**（FR-CBT-012）。
+   *
+   * 画法：从画面四边向内的一圈黑环，环厚 = `(1 - 可见比例) × 半屏短边 × 1.6`。
+   * 可见比例的下限由内核保证（`INK_MIN_VISIBLE = 0.35`），所以**中间永远留得下一块亮区** ——
+   * 这是"难受但还能打"与"看不见＝没法玩"的分界线。
+   *
+   * 为什么用径向渐变的近似（多圈叠加）而不是 shader：
+   * R1 零美术、灰盒优先，`Graphics` 够用；换成 shader 是 M2 的事。
+   */
+  private drawPollution(g: Graphics, sc: PlayableScene): void {
+    const pollution = sc.world.inkPollution
+    if (!(pollution > 0)) return
+    const visible = sc.world.visibleRatio()
+    const steps = 7
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps
+      // 越靠外越黑：一圈一圈往内收
+      const inset = t * (1 - visible)
+      const alpha = (1 - t) * 0.85 * Math.min(1, pollution * 1.6)
+      if (alpha <= 0.01) continue
+      const margin = inset * VIEW_W * 0.5
+      const top = inset * VIEW_H * 0.5
+      g.fillColor = withAlpha(C.pollution, alpha)
+      // 上
+      g.rect(-VIEW_W / 2, VIEW_H / 2 - top - margin * 0.6, VIEW_W, top + margin * 0.6)
+      // 下
+      g.rect(-VIEW_W / 2, -VIEW_H / 2, VIEW_W, top + margin * 0.6)
+      // 左
+      g.rect(-VIEW_W / 2, -VIEW_H / 2, margin, VIEW_H)
+      // 右
+      g.rect(VIEW_W / 2 - margin, -VIEW_H / 2, margin, VIEW_H)
+      g.fill()
     }
   }
 
@@ -694,16 +850,22 @@ function withAlpha(c: Color, k: number): Color {
 }
 
 /**
- * 刚体 → 灰盒颜色。**按 tag 与状态推导，不按名字硬编码** ——
- * 这样 M0 沙盒与序章场景能共用同一个渲染器（见 core/playable.ts）。
+ * 刚体 → 灰盒颜色。**优先按名字认三类敌人，其次按 tag 与状态推导**。
+ *
+ * 为什么这里必须按名字：墨卒/墨甲/墨刃/墨缚/墨巢的 `tag` 都是 `'enemy'`，
+ * 靠 tag 分不出"这是哪种"；而灰盒阶段玩家**必须能分辨**（FR-CBT-011 的可读性要求）。
+ * 名字是敌人唯一的语义标识（见 `core/enemies.ts` 的 `isBlade/isBind/isNest`）。
  */
 function colorOf(b: Body): Color {
+  if (b.name === 'blade') return !b.alive ? C.armorDead : b.hp < b.maxHp ? C.armorHurt : C.blade
+  if (b.name === 'bind') return !b.alive ? C.armorDead : b.hp < b.maxHp ? C.armorHurt : C.bind
+  if (b.name === 'nest') return !b.alive ? C.armorDead : b.hp < b.maxHp ? C.armorHurt : C.nest
+  if (b.name.startsWith('ink-dot')) return C.inkDot
   switch (b.tag) {
     case 'player':
       // 着地/离地用不同色调，让"谁是主动方"一眼可读（设计 §2.2）
       return b.grounded ? C.player : C.playerAir
-    case 'prop':
-      // 易碎物（陶罐）用略暖的灰，和石块区分开
+    case 'prop':      // 易碎物（陶罐）用略暖的灰，和石块区分开
       return b.shattersOnDeath ? C.fragile : C.stone
     case 'enemy':
       // 血量用颜色深浅表达，不显示血条（FR-UI-005 / FR-CBT-008）

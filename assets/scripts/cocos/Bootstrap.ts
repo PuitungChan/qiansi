@@ -45,6 +45,7 @@ import { formatCaptureLines } from '../core/replay'
 import { predictTrajectory } from '../core/aim'
 import type { PlayableScene } from '../core/playable'
 import { M0Scenario } from '../core/scene_m0'
+import { EnemyTrainingScenario } from '../core/scene_enemies'
 import { PrologueScene } from '../core/scene_prologue'
 import type { Telemetry } from '../core/telemetry'
 import { DebugPanel, type DebugPanelState } from './DebugPanel'
@@ -75,7 +76,15 @@ const MAX_STEPS_PER_FRAME = 5
  */
 const REPLAY_RECORD_MAX = 60 * 180
 
-type SceneKind = 'prologue' | 'm0'
+/**
+ * 可切换的场景。`M` 键按 序章 → M0 → 训练场 → 序章 循环。
+ *
+ * 第 20 轮加了 `'enemies'`：三类敌人（墨刃/墨缚/墨巢）**不进序章也不进 M0**
+ * —— 序章的 12 分钟节奏已排满，而 M0 有一条锁定哈希的演示脚本，
+ * 往它里面加会互相碰撞的刚体会把"手感有没有变"这个问题的答案搅浑（D-065 ④）。
+ * 所以它们有自己的房间：`core/scene_enemies.ts`。
+ */
+type SceneKind = 'prologue' | 'm0' | 'enemies'
 
 @ccclass('QiansiBootstrap')
 export class QiansiBootstrap extends Component {
@@ -285,7 +294,9 @@ export class QiansiBootstrap extends Component {
     this.scene =
       this.sceneKind === 'prologue'
         ? new PrologueScene({ ropeCount: this.ropeCount })
-        : new M0Scenario({ ropeCount: this.ropeCount })
+        : this.sceneKind === 'm0'
+          ? new M0Scenario({ ropeCount: this.ropeCount })
+          : new EnemyTrainingScenario({ ropeCount: this.ropeCount })
     this.ropeBreaks = 0
     this.demoMode = false
     this.demoIndex = 0
@@ -396,7 +407,9 @@ export class QiansiBootstrap extends Component {
     }
 
     if (pressed(KeyCode.KEY_M)) {
-      this.sceneKind = this.sceneKind === 'prologue' ? 'm0' : 'prologue'
+      // 序章 → M0 沙盒 → **敌人训练场** → 序章（第 20 轮加了第三站）
+      this.sceneKind =
+        this.sceneKind === 'prologue' ? 'm0' : this.sceneKind === 'm0' ? 'enemies' : 'prologue'
       this.buildScene()
       console.log(`[牵丝] 已切换到场景：${this.sceneKind}`)
     }
@@ -526,7 +539,12 @@ export class QiansiBootstrap extends Component {
       this.drawPanelBackground(this.gfx)
       const state: DebugPanelState = {
         fps: this.fps,
-        sceneName: this.sceneKind === 'prologue' ? '序章（12 分钟）' : 'M0 沙盒',
+        sceneName:
+          this.sceneKind === 'prologue'
+            ? '序章（12 分钟）'
+            : this.sceneKind === 'm0'
+              ? 'M0 沙盒'
+              : '敌人训练场',
         demoMode: this.demoMode,
         demoIndex: this.demoIndex,
         demoTicks: this.demoTicks,

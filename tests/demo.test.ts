@@ -36,8 +36,16 @@ import { M0Scenario } from '../assets/scripts/core/scene_m0'
  *   低位比特变了，哈希就变了。手感与结果**一位都没动**：断丝甩速 9.4254 m/s、
  *   墨甲掉到 20.0911，与上一个基线逐位一致到小数点后 4 位。
  *   收益：导出的回放文本重新喂回来能**逐位复现**当前这一局（见 `tests/replay.test.ts`）。
+ * - `d500cda550da7d38` 第 20 轮：`D-065`（敌人行为状态进哈希）
+ *   —— `stateValues()` 新增了 `inkPollution` 与每具刚体的
+ *   `entangleRope / entangleRemaining / entangleCooldown / fireCooldown / dotLife`。
+ *   演示场景里**一个敌人都没有**（那些字段全恒为 0），所以这是**哈希口径变宽**，
+ *   不是行为变化：断丝甩速 **9.4254 m/s**、墨甲掉到 **20.0911**、脱靶距离
+ *   **0.100014158** 全部与上一版**逐位相同**。
+ *   为什么非加不可：视野污染是**玩法状态**（决定玩家还能看见多少信息），
+ *   它和缠绕/开火倒计时如果不进哈希，"回放到第 N 帧开始分叉"就无法被测试发现。
  */
-const EXPECTED_HASH = 'a5842430330c891d'
+const EXPECTED_HASH = 'd500cda550da7d38'
 
 test('演示脚本长度固定且不含任何随机性', () => {
   const a = demoScript()

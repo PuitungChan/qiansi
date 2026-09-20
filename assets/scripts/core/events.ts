@@ -62,6 +62,34 @@ export type SimEvent =
     }
   /** 目标死亡。M0/M1 不实现死亡流程，仅供调试面板与埋点。 */
   | { readonly kind: 'killed'; readonly target: number; readonly by: number; readonly at: Vec2 }
+  // ── 敌人行为（第 20 轮 / FR-CBT-011 / FR-CBT-012）────
+  //
+  // 这五条都是**可回放、可埋点**的玩法事件（不是表现）。放在内核里而不是渲染层，
+  // 是为了"创始人按 H 导出的回放能把它们重新打出来"—— 定位"我明明被射中了却没变黑"
+  // 这类问题时，事件时间线比截图有用得多。
+  /** 墨缚伸触须**缠住**了一根丝（那根丝随后既不能收也不能放，但可以断）。 */
+  | { readonly kind: 'bind-grab'; readonly body: number; readonly rope: number }
+  /** 墨缚松开了触须（到时 / 那根丝被断掉 / 墨缚死亡）。 */
+  | { readonly kind: 'bind-release'; readonly body: number; readonly rope: number }
+  /** 墨巢射出一枚墨点。 */
+  | { readonly kind: 'nest-fire'; readonly body: number; readonly x: number; readonly y: number }
+  /** 墨点命中主角 ⇒ 视野被污染。 */
+  | {
+      readonly kind: 'ink-hit'
+      readonly dot: number
+      readonly pollution: number
+      readonly visible: number
+    }
+  /** **撕裂处决**（FR-CBT-004）：两根丝反向拉且张力差 > 300 ⇒ 直接击杀。 */
+  | {
+      readonly kind: 'tear'
+      readonly body: number
+      readonly ropeA: number
+      readonly ropeB: number
+      readonly tensionA: number
+      readonly tensionB: number
+      readonly angle: number
+    }
 
 /** 事件类型过滤助手，渲染层用。 */
 export function eventsOf<K extends SimEvent['kind']>(

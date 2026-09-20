@@ -170,6 +170,46 @@ export interface Body {
    */
   removed: boolean
 
+  /**
+   * **承重点**（第 20 轮 / FR-CBT-012）：物体身上的一个圆形弱点区域。
+   *
+   * 目前只有墨巢（`weakness: 'structure'`）用它。`coreRadius = 0` 表示没有承重点。
+   * 打中承重点 ⇒ 伤害 ×`NEST_CORE_MULTIPLIER`（3）；打中其他部位 ⇒ ×1。
+   *
+   * 为什么要把它做成**物体身上的一个点**而不是"另一种敌人"：
+   * 设计 §4.1 说墨巢的解法是"击中承重点使其崩塌"——**难点在于瞄哪里，不在于打多快**。
+   * 所以它是一个几何问题，用几何表示最直接。
+   */
+  coreOffset: Vec2
+  coreRadius: number
+
+  /**
+   * **被墨缚缠住的那根丝的下标**（`-1` = 没被缠）。
+   *
+   * 墨缚的触须缠住一根丝之后，那根丝**不能收也不能放，但可以断**（D-065）。
+   * 规则写在 `applyRopeCommands` 里 —— 它是**输入层的过滤**，不是力学层的：
+   * 丝线照旧传递拉力，只是玩家这一端暂时失去了对它的控制权。
+   */
+  entangleRope: number
+  /** 缠绕剩余时间（秒）。归零时自动松开，并把 `entangleRope` 复位为 -1。 */
+  entangleRemaining: number
+  /** 距离下一次尝试缠绕还有多久（秒）。见 `BIND_INTERVAL_SEC`。 */
+  entangleCooldown: number
+  /** 巢的下一次开火倒计时（秒）。只有墨巢用。 */
+  fireCooldown: number
+
+  /**
+   * **巡逻带**（墨刃用）：以 `patrolCenterX` 为中心、`patrolHalfWidth` 为半宽来回走。
+   *
+   * 为什么用"相对入场点"而不是绝对边界：关卡重排时只要挪一个 x，
+   * 巡逻带跟着走 —— 不会漏改一个藏在别处的边界常数。
+   */
+  patrolCenterX: number
+  patrolHalfWidth: number
+
+  /** 墨点剩余寿命（秒）。归零即回到池子（`removed`）。只有墨点用。 */
+  dotLife: number
+
   /** ── 以下为每 tick 由 refreshDerived() 刷新的派生量（FR-PHY-014）── */
   /** 动量 p = m·v */
   momentum: Vec2
@@ -203,6 +243,14 @@ export interface BodyInit {
   fragile?: boolean
   /** 易伤：不做门槛判定，撞上就按公式掉血。见 `vulnerable`。 */
   vulnerable?: boolean
+  /** 承重点半径（米）。0 / 不传 = 没有承重点。见 `Body.coreRadius`。 */
+  coreRadius?: number
+  /** 承重点相对物体中心的偏移。默认 {0,0}。 */
+  coreOffset?: Vec2
+  /** 巡逻半宽（米）。0 / 不传 = 不巡逻。中心取 `pos.x`。见 `Body.patrolHalfWidth`。 */
+  patrolHalfWidth?: number
+  /** 墨点寿命（秒）。不传 = 0。 */
+  dotLife?: number
   /**
    * **名义质量**。
    *
@@ -236,6 +284,15 @@ export function createBody(init: BodyInit): Body {
     shattersOnDeath: init.shattersOnDeath ?? false,
     fragile: init.fragile ?? false,
     vulnerable: init.vulnerable ?? false,
+    coreOffset: init.coreOffset ?? { x: 0, y: 0 },
+    coreRadius: init.coreRadius ?? 0,
+    entangleRope: -1,
+    entangleRemaining: 0,
+    entangleCooldown: 0,
+    fireCooldown: 0,
+    patrolCenterX: init.pos.x,
+    patrolHalfWidth: init.patrolHalfWidth ?? 0,
+    dotLife: init.dotLife ?? 0,
     fadeTicks: 0,
     removed: false,
     momentum: { x: 0, y: 0 },
