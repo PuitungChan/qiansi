@@ -109,11 +109,12 @@ test('提示推进由真实操作驱动（连上 → 收丝 → 断丝 → 去�
   sc.step(input({ reel: 'in' }))
   assert.equal(sc.hint(), TEXTS.hintCut)
 
-  // 断丝：三件事学完，但**提示不会消失**
-  // ⚠️ 第 14 轮：设计 §7 原来要求"三件都学会之后什么都不显示"，
-  // 创始人试玩后推翻了它（「我完全不知道我该干什么」）。现在会接着说下一步。
+  // 断丝：三件事学完
+  // ⚠️ 第 14 轮：设计 §7 原来要求"三件都学会之后什么都不显示"，创始人推翻了它；
+  // ⚠️ 第 15 轮：原先这里接的是"去砸碎罐子"，创始人又说「砸碎靶子罐头的教程可以去掉了」
+  // ⇒ 现在三件事一学完就直接进遭遇战，中间不再有罐子那一步。
   sc.step(input({ cutRope: 0 }))
-  assert.equal(sc.hint(), TEXTS.stepBreakJar, '三件事学完就该告诉玩家下一步：去砸陶罐')
+  assert.equal(sc.hint(), TEXTS.stepTutorialDone, '三件事学完就进下一段，不再有"去砸罐子"')
 })
 
 test('引导：目标行随段落变化，物体说明按段出现（第 14 轮创始人要求）', () => {
@@ -860,6 +861,75 @@ test('#3 甩起来的一击**真的能打死墨卒**（端到端：连上→甩�
     `这一击应该打死墨卒（HP ${C.MOTE_HP}，15 m/s 的切割伤害是 ${((C.CUT_MIN_SPEED * C.CUT_MIN_SPEED) / 60).toFixed(2)}）`,
   )
   assert.ok(sc.telemetry.ac01Passed(60), '而且这次击杀应该被 AC-01 记到账上')
+})
+
+test('#3 撞上就掉血：中等速度也扣血，够快就一击死（第 15 轮）', () => {
+  const damageAt = (speed: number): { hp: number; dead: boolean } => {
+    const sc = new PrologueScene()
+    sc.skipTo('encounter')
+    sc.player.pos = { x: 4, y: C.PLAYER_HALF_H + 0.01 }
+    for (let i = 0; i < 10; i++) sc.step(NO_INPUT)
+    sc.stone.pos = { x: sc.mote.pos.x - 2, y: 0.5 }
+    sc.stone.vel = { x: speed, y: 0 }
+    for (let i = 0; i < 120; i++) sc.step(NO_INPUT)
+    return { hp: sc.mote.hp, dead: !sc.mote.alive }
+  }
+
+  // 创始人两次反馈「视觉上砸到了但不掉血」——根因是 v≥15 的门槛。
+  // 现在教学敌人 `vulnerable`（不做门槛判定），所以只要撞上就掉血：
+  const slow = damageAt(8)
+  assert.ok(slow.hp < C.MOTE_HP, `8 m/s 撞上去也该掉血（原来一点不掉），实际 hp=${slow.hp}`)
+  const mid = damageAt(12)
+  assert.ok(mid.hp < slow.hp, '越快掉血越多（伤害是 v²/60）')
+  assert.equal(damageAt(15).dead, true, '15 m/s 一击死（这就是"一下死，它是教学工具"）')
+  assert.equal(damageAt(20).dead, true, '20 m/s 当然也一击死')
+})
+
+test('#3 地形加厚：高速砸下去不会把墨卒砸穿到地面以下', () => {
+  let worst = Number.POSITIVE_INFINITY
+  for (let trial = 0; trial < 8; trial++) {
+    const sc = new PrologueScene()
+    sc.skipTo('encounter')
+    sc.player.pos = { x: 4, y: C.PLAYER_HALF_H + 0.01 }
+    for (let i = 0; i < 10; i++) sc.step(NO_INPUT)
+    const m = sc.mote
+    sc.stone.pos = { x: m.pos.x - 0.3, y: m.pos.y + 1 }
+    sc.stone.vel = { x: 4 + trial * 4, y: -10 - trial * 4 }
+    for (let i = 0; i < 300; i++) sc.step(NO_INPUT)
+    worst = Math.min(worst, sc.mote.pos.y)
+  }
+  assert.ok(
+    worst > -0.5,
+    `墨卒不该掉到地面以下（地面顶面 y=0，地形厚度 ${C.TERRAIN_HALF_H * 2}m 就是为了防这个），实际最低 y=${worst.toFixed(2)}`,
+  )
+})
+
+test('#4 收丝的拉力有上限：不会把人"弹射"出去（第 15 轮）', () => {
+  const sc = new PrologueScene()
+  sc.skipTo('dual')
+  sc.player.pos = { x: 14.6, y: C.PLAYER_HALF_H + 0.01 }
+  for (let i = 0; i < 20; i++) sc.step(NO_INPUT)
+  assert.equal(
+    fire(sc, {
+      x: C.SWING_BEAM_CENTER_X - C.SWING_BEAM_HALF_W,
+      y: C.SWING_BEAM_CENTER_Y - C.SWING_BEAM_HALF_H,
+    }),
+    true,
+  )
+
+  let peak = 0
+  for (let i = 0; i < 240; i++) {
+    sc.step(input({ reel: 'in' }))
+    peak = Math.max(peak, Math.hypot(sc.player.vel.x, sc.player.vel.y))
+  }
+  // 改之前实测 39.68 m/s（张力上限 1200N 对 0.5kg = 2400 m/s²，一帧就是 40 m/s）。
+  // 创始人原话：「速度太快来不及放第二根丝」。
+  assert.ok(
+    peak < 20,
+    `收丝拉人不应超过 20 m/s（收丝速度本身才 ${C.ROPE_REEL_SPEED_BASE}），实际峰值 ${peak.toFixed(2)}`,
+  )
+  // 而且**仍然要被拉过去**（这是质量差那一课的核心）
+  assert.ok(sc.player.pos.y > 5, `还是得把人拉到横梁那边，实际 y=${sc.player.pos.y.toFixed(2)}`)
 })
 
 test('批 4：掉进沟里 → 软重生回沟边（R1 不做死亡，D-040）', () => {

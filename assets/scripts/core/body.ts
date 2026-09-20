@@ -139,6 +139,21 @@ export interface Body {
   fragile: boolean
 
   /**
+   * **易伤**（第 15 轮加）：**不做伤害公式的门槛判定** —— 任何达到
+   * `MIN_DAMAGE_SPEED` 的撞击都按公式结算，而不是被 `m_eff ≥ 3` / `v ≥ 15` 判成 0。
+   *
+   * 为什么需要它：墨卒质量 1 ⇒ 冲击的 `m_eff = min(4, 1) = 1 < 3` **永远被挡**，
+   * 只剩切割，而切割门槛是 **v ≥ 15**；更糟的是判定用的是**撞击瞬间的法向速度**，
+   * 比出手速度更低（出手 15 的石头打到它身上往往只剩 13~14）。于是创始人两次
+   * 反馈同一件事：「**视觉上砸到了但不掉血**」。
+   *
+   * 教学敌人存在的意义就是让玩家确认"我这一下打中了"，所以它不做门槛判定：
+   * 只要撞上（≥ 6 m/s）就按 `v²/60` 掉血 —— **伤害仍然强烈依赖速度**（平方关系），
+   * 只是不再有"看着打中了却一点血都不掉"的死区。门槛本身（战斗用的那两道）一个字没改。
+   */
+  vulnerable: boolean
+
+  /**
    * 已被移出世界（碎裂、消散）。`detectContacts` 与渲染层都会跳过它。
    * 用布尔标记而不是从 `bodies` 数组里删元素 —— **数组下标就是刚体 id**，
    * 一删就会让 id 错位，确定性直接崩掉。
@@ -176,6 +191,8 @@ export interface BodyInit {
   shattersOnDeath?: boolean
   /** 易碎：撞到就碎，不走伤害门槛。见 `fragile`。 */
   fragile?: boolean
+  /** 易伤：不做门槛判定，撞上就按公式掉血。见 `vulnerable`。 */
+  vulnerable?: boolean
   /**
    * **名义质量**。
    *
@@ -208,6 +225,7 @@ export function createBody(init: BodyInit): Body {
     ignorePlayer: false,
     shattersOnDeath: init.shattersOnDeath ?? false,
     fragile: init.fragile ?? false,
+    vulnerable: init.vulnerable ?? false,
     removed: false,
     momentum: { x: 0, y: 0 },
     kineticEnergy: 0,

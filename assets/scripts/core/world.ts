@@ -544,9 +544,15 @@ export class World {
       // 至于原来那个 240 g 的暴击：张力上限 1200 N 对 0.5 kg 是 240 g。主角着地时
       // 等效质量 1e6，这个力什么都做不了（所以走路时毫无感觉）；可一旦踏空、质量回到 0.5，
       // 同一根绷紧的丝在一帧内就把他推成 **vy = +29 m/s**。实测就是这么上天的。
+      // 第 15 轮补：**收丝时的拉力也要有上限**（`PLAYER_ROPE_MAX_ACCEL`）。
+      // 实测从沟左沿收丝到悬吊横梁那一路，主角最高速度是 **39.68 m/s**（收丝速度只有 8），
+      // 创始人原话「速度太快来不及放第二根丝」。现在把加速度夹在 60 m/s² 以内，
+      // 剩下的位移交给刚性约束（按收丝速度把人收进去）。
+      // ⚠️ 只夹**主角**这一端；物体那一端（甩石头的手感）一个字没动。
       if (this.reeledInThisTick) {
-        this.fx[p.id] += nx * T
-        this.fy[p.id] += ny * T
+        const f = Math.min(T, C.PLAYER_ROPE_MAX_ACCEL / p.invMass)
+        this.fx[p.id] += nx * f
+        this.fy[p.id] += ny * f
       }
     }
   }
@@ -787,7 +793,11 @@ export class World {
     // 耐久口径也由我定：**砸到就碎**。
     const res: DamageResult = target.fragile
       ? { type: 'impact', amount: Math.max(target.hp, 1), effective: true }
-      : resolveImpactAgainst(attacker.damageMass, target.damageMass, target.weakness, speed)
+      : target.vulnerable
+        ? // 易伤目标：只保留"撞上了没有"（MIN_DAMAGE_SPEED）这一道，按切割公式结算。
+          // 见 Body.vulnerable —— 教学敌人不该出现"看着打中了却不掉血"的死区。
+          { type: 'cut', amount: (speed * speed) / C.CUT_DIVISOR, effective: true }
+        : resolveImpactAgainst(attacker.damageMass, target.damageMass, target.weakness, speed)
     if (!res.effective || res.amount <= 0) return
 
     target.hp -= res.amount

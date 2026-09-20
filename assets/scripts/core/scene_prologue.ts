@@ -157,16 +157,16 @@ export class PrologueScene implements PlayableScene {
       name: 'ground-left',
       kind: 'static',
       tag: 'static',
-      shape: aabb(C.CHASM_LEFT_X / 2, 0.5),
-      pos: { x: C.CHASM_LEFT_X / 2, y: -0.5 },
+      shape: aabb(C.CHASM_LEFT_X / 2, C.TERRAIN_HALF_H),
+      pos: { x: C.CHASM_LEFT_X / 2, y: -C.TERRAIN_HALF_H },
       friction: 0.8,
     })
     const groundRight = w.addBody({
       name: 'ground-right',
       kind: 'static',
       tag: 'static',
-      shape: aabb((C.M0_ROOM_W - C.CHASM_RIGHT_X) / 2, 0.5),
-      pos: { x: (C.M0_ROOM_W + C.CHASM_RIGHT_X) / 2, y: -0.5 },
+      shape: aabb((C.M0_ROOM_W - C.CHASM_RIGHT_X) / 2, C.TERRAIN_HALF_H),
+      pos: { x: (C.M0_ROOM_W + C.CHASM_RIGHT_X) / 2, y: -C.TERRAIN_HALF_H },
       friction: 0.8,
     })
     const pitFloor = w.addBody({
@@ -180,16 +180,16 @@ export class PrologueScene implements PlayableScene {
       // 会**永远下落**（y → -∞ 让状态哈希变成 NaN，AC-05 直接崩）。
       // 批 4 的墨卒就是这么掉出去的。铺满之后，"世界之外"这件事不再存在。
       // 玩家掉沟仍然由 `checkFall` 在 y ≤ -2 时接走，永远落不到这里。
-      shape: aabb(C.M0_ROOM_W / 2, 0.5),
-      pos: { x: C.M0_ROOM_W / 2, y: C.CHASM_FLOOR_Y - 0.5 },
+      shape: aabb(C.M0_ROOM_W / 2, C.TERRAIN_HALF_H),
+      pos: { x: C.M0_ROOM_W / 2, y: C.CHASM_FLOOR_Y - C.TERRAIN_HALF_H },
       friction: 0.4,
     })
     const ceil = w.addBody({
       name: 'ceiling',
       kind: 'static',
       tag: 'static',
-      shape: aabb(C.M0_ROOM_W / 2, 0.5),
-      pos: { x: C.M0_ROOM_W / 2, y: C.M0_ROOM_H + 0.5 },
+      shape: aabb(C.M0_ROOM_W / 2, C.TERRAIN_HALF_H),
+      pos: { x: C.M0_ROOM_W / 2, y: C.M0_ROOM_H + C.TERRAIN_HALF_H },
       friction: 0.2,
     })
     // 侧墙要一直延伸到沟底，否则玩家会从侧面掉出世界
@@ -199,16 +199,16 @@ export class PrologueScene implements PlayableScene {
       name: 'wall-left',
       kind: 'static',
       tag: 'static',
-      shape: aabb(0.5, wallHalfH),
-      pos: { x: -0.5, y: wallMidY },
+      shape: aabb(C.TERRAIN_HALF_H, wallHalfH),
+      pos: { x: -C.TERRAIN_HALF_H, y: wallMidY },
       friction: 0.2,
     })
     const rightWall = w.addBody({
       name: 'wall-right',
       kind: 'static',
       tag: 'static',
-      shape: aabb(0.5, wallHalfH),
-      pos: { x: C.M0_ROOM_W + 0.5, y: wallMidY },
+      shape: aabb(C.TERRAIN_HALF_H, wallHalfH),
+      pos: { x: C.M0_ROOM_W + C.TERRAIN_HALF_H, y: wallMidY },
       friction: 0.2,
     })
 
@@ -287,6 +287,7 @@ export class PrologueScene implements PlayableScene {
       anchorable: false, // R1 阶段敌人不可被牵（D-038）
       hp: C.MOTE_HP,
       weakness: 'any', // 设计 §4.1：墨卒「弱点：任意」
+      vulnerable: true, // 教学敌人：撞上就掉血，不做门槛判定（见 Body.vulnerable）
     })
     mote.removed = true
 
@@ -367,6 +368,7 @@ export class PrologueScene implements PlayableScene {
       anchorable: false,
       hp: C.MOTE_HP,
       weakness: 'any',
+      vulnerable: true,
     })
     mote2.removed = true
 
@@ -623,7 +625,13 @@ export class PrologueScene implements PlayableScene {
     for (const s of this.spawns) {
       const b = s.body
       if (b === this.player || b.kind === 'static' || b.removed) continue
-      if (b.pos.y > C.CHASM_FALL_Y || !this.inChasm(b.pos.x)) continue
+      // 掉进沟里 ⇒ 送回出生点（纯进度门控下，否则"把石块扔进沟里"就是死局）；
+      // **世界之下**（比沟底还低）也算掉出去 —— 加厚地形之后应该到不了那里，
+      // 但这是最后一道保险：一旦有东西到了这里，它只会永远下落
+      // （y → −∞ 会让状态哈希变成 NaN，AC-05 直接崩）。见 `TERRAIN_HALF_H`。
+      const inChasm = this.inChasm(b.pos.x) && b.pos.y <= C.CHASM_FALL_Y
+      const belowWorld = b.pos.y < C.CHASM_FLOOR_Y - C.TERRAIN_HALF_H - 1
+      if (!inChasm && !belowWorld) continue
       b.pos = { x: s.x, y: s.y }
       b.vel = { x: 0, y: 0 }
       b.grounded = false
@@ -738,7 +746,9 @@ export class PrologueScene implements PlayableScene {
     switch (this.stage) {
       case 'tutorial': {
         const s = hintStep(this.hints)
-        if (s === 'done') return this.jar.alive ? 'stepBreakJar' : 'cleared'
+        // 第 15 轮：三件事学完就直接进遭遇战，不再有"去砸罐子"那一步
+        // （创始人：「砸碎靶子罐头的教程可以去掉了」）。
+        if (s === 'done') return 'stepTutorialDone'
         if (s === 'attach') return 'hintAttach'
         if (s === 'reel') return 'hintReel'
         return 'hintCut'
@@ -771,7 +781,8 @@ export class PrologueScene implements PlayableScene {
         return {
           goal: t('goalTutorial'),
           step,
-          notes: this.hints.everCut ? [t('noteStone'), t('noteJar')] : [t('noteStone')],
+          // 第 15 轮：不再介绍罐子（它已经不在教程里了）。
+          notes: [t('noteStone')],
         }
 
       case 'encounter':
@@ -785,7 +796,7 @@ export class PrologueScene implements PlayableScene {
         return {
           goal: t('goalMassDiff'),
           step,
-          notes: [t('noteBeam'), t('notePot'), ...(this.jar.alive ? [t('noteJar')] : [])],
+          notes: [t('noteBeam'), t('notePot')],
         }
 
       case 'dual':

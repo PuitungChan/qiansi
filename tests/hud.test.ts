@@ -17,12 +17,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  BEAM_CENTER_Y,
+  BEAM_HALF_H,
   CHASM_LEFT_X,
   CHASM_RIGHT_X,
+  FAR_POST_CENTER_Y,
+  M0_ROOM_H,
+  SWING_BEAM_CENTER_Y,
   VIEW_H,
   VIEW_ORIGIN_Y,
   VIEW_W,
-  M0_ROOM_H,
 } from '../assets/scripts/core/constants'
 import { HUD_BUTTONS, buttonAt, pointInButton } from '../assets/scripts/core/hud'
 import { PrologueScene } from '../assets/scripts/core/scene_prologue'
@@ -45,9 +49,23 @@ test('**地面与深沟都在可见窗口内**（第 13 轮实机反馈 #1 的�
   assert.ok(pitTop.y - pit.y > 200, `沟在屏幕上至少要有 200px 高，实际 ${pitTop.y - pit.y}px`)
 })
 
-test('主横梁（y≈13）在可见窗口内，天花板允许在屏幕外', () => {
-  const beamTop = worldToScreen({ x: 9, y: 13.6 })
+test('主横梁在可见窗口内、而且不贴着屏幕顶边（第 15 轮）', () => {
+  const beamTop = worldToScreen({ x: 9, y: BEAM_CENTER_Y + BEAM_HALF_H })
   assert.ok(beamTop.y <= VIEW_H + 1, `横梁顶面不该被切掉，实际 ${beamTop.y} > ${VIEW_H}`)
+  // ⚠️ 创始人原话「梁柱太高了，我差点没找到」——当时它在 y=13（屏幕 1044px），
+  // 离顶边只剩 36px，看上去像天花板的一部分。现在要求它离顶边有富余。
+  assert.ok(
+    VIEW_H - beamTop.y > 150,
+    `横梁不该贴着屏幕顶边，实际离顶边只有 ${(VIEW_H - beamTop.y).toFixed(0)}px`,
+  )
+  // 悬吊横梁与对岸吊桩也要在画面里（8:00 那一段全部靠"看得见吊点"）
+  for (const [name, y] of [
+    ['swing-beam', SWING_BEAM_CENTER_Y],
+    ['far-post', FAR_POST_CENTER_Y],
+  ] as const) {
+    const s = worldToScreen({ x: 18, y })
+    assert.ok(s.y > 0 && s.y < VIEW_H, `${name} 必须在画面内，实际屏幕 y=${s.y.toFixed(0)}`)
+  }
   const ceil = worldToScreen({ x: 16, y: M0_ROOM_H })
   assert.ok(ceil.y > VIEW_H, '天花板在屏幕外是**预期**的：它只负责封闭碰撞')
 })
